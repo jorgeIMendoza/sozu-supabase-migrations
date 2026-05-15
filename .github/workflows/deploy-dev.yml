@@ -14,6 +14,23 @@ jobs:
         with:
           version: latest
 
+      - name: Instalar cliente PostgreSQL
+        run: sudo apt-get install -y postgresql-client -q
+
+      - name: Sincronizar historial de migraciones
+        env:
+          PGSSLMODE: disable
+        run: |
+          psql "${{ secrets.DEV_DB_URL }}" <<'SQL'
+            DELETE FROM supabase_migrations.schema_migrations
+            WHERE version < '20260513000000';
+
+            INSERT INTO supabase_migrations.schema_migrations (version)
+            VALUES ('20260513000000'), ('20260513000001'),
+                   ('20260513000002'), ('20260513000003')
+            ON CONFLICT (version) DO NOTHING;
+          SQL
+
       - name: Deploy migrations to dev
         env:
           PGSSLMODE: disable
