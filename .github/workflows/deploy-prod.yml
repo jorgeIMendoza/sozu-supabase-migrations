@@ -17,4 +17,6 @@ jobs:
       - name: Deploy migrations to production
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-        run: supabase db push --project-ref "${{ secrets.PROD_PROJECT_REF }}"
+        run: |
+          supabase link --project-ref "${{ secrets.PROD_PROJECT_REF }}" --yes
+          supabase db push --include-all --yes
