@@ -1,0 +1,19 @@
+name: Deploy Migrations to Dev
+
+on:
+  push:
+    branches: [dev]
+
+jobs:
+  deploy:
+    if: false # Deshabilitado — activar cuando se quiera hacer deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Deploy migrations to dev
+        run: supabase db push --db-url "${{ secrets.DEV_DB_URL }}"
