@@ -15,4 +15,6 @@ jobs:
           version: latest
 
       - name: Deploy migrations to dev
-        run: supabase db push --db-url "${{ secrets.DEV_DB_URL }}?sslmode=disable"
+        env:
+          PGSSLMODE: disable
+        run: supabase db push --db-url "${{ secrets.DEV_DB_URL }}"
