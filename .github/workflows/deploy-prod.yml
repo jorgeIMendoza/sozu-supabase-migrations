@@ -6,6 +6,7 @@ on:
 
 jobs:
   deploy:
+    if: false # Deshabilitado — activar cuando se quiera hacer deploy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
