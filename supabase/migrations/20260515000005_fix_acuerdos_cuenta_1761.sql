@@ -7,34 +7,44 @@
 --   Contra-entrega: 3,573,732.28
 --   TOTAL:          4,626,310.94
 --
--- Guard: solo ejecuta si cuenta_cobranza 1761 existe (parche exclusivo de PRD).
+-- Guard 1: omite si la cuenta no existe (DEV / ambientes sin datos PRD).
+-- Guard 2: omite si los acuerdos correctos ya fueron insertados (idempotente para PRD).
 
 DO $$
 BEGIN
+  -- Guard 1: ambiente sin la cuenta
   IF NOT EXISTS (SELECT 1 FROM public.cuentas_cobranza WHERE id = 1761) THEN
-    RAISE NOTICE 'cuenta_cobranza 1761 no existe en este ambiente — migración 20260515000005 omitida';
+    RAISE NOTICE 'cuenta_cobranza 1761 no existe — migración 20260515000005 omitida';
     RETURN;
   END IF;
 
-  -- ─── PASO 1: Validar que los acuerdos a borrar no tengan aplicaciones ────────
-  -- (ejecutado en tiempo de migración; resultado visible en logs si hay conflicto)
-  PERFORM id_acuerdo_pago
-  FROM public.aplicaciones_pago
-  WHERE id_acuerdo_pago BETWEEN 26613 AND 26625
-    AND activo = true
-  LIMIT 1;
+  -- Guard 2: ya fue aplicada (mensualidades de $25,000 ya existen en ordenes 3-33)
+  IF EXISTS (
+    SELECT 1 FROM public.acuerdos_pago
+    WHERE id_cuenta_cobranza = 1761
+      AND id_concepto = 5
+      AND monto = 25000.00
+      AND orden = 3
+  ) THEN
+    RAISE NOTICE 'Acuerdos ya existen para cuenta 1761 — migración 20260515000005 omitida (ya aplicada)';
+    RETURN;
+  END IF;
 
-  IF FOUND THEN
+  -- Validar que los acuerdos a borrar no tengan aplicaciones activas
+  IF EXISTS (
+    SELECT 1 FROM public.aplicaciones_pago
+    WHERE id_acuerdo_pago BETWEEN 26613 AND 26625
+      AND activo = true
+  ) THEN
     RAISE EXCEPTION 'Existen aplicaciones_pago activas en acuerdos 26613-26625 — abortar migración';
   END IF;
 
-  -- ─── PASO 2: Borrar los 12 acuerdos vacíos (concepto 5, monto=0) y la
-  --             contra-entrega incorrecta (id 26625) ───────────────────────────
+  -- Borrar los 12 acuerdos vacíos (concepto 5, monto=0) y contra-entrega incorrecta (id 26625)
   DELETE FROM public.acuerdos_pago
   WHERE id BETWEEN 26613 AND 26625
     AND id_cuenta_cobranza = 1761;
 
-  -- ─── PASO 3: Insertar las 31 mensualidades correctas de $25,000 ─────────────
+  -- Insertar las 31 mensualidades correctas de $25,000
   INSERT INTO public.acuerdos_pago
     (id_cuenta_cobranza, id_concepto, monto, fecha_pago, orden, pago_completado, activo)
   VALUES
@@ -70,14 +80,14 @@ BEGIN
     (1761, 5, 25000.00, '2028-11-30', 32, false, true),
     (1761, 5, 25000.00, '2028-12-31', 33, false, true);
 
-  -- ─── PASO 4: Insertar contra-entrega corregida ───────────────────────────────
+  -- Insertar contra-entrega corregida
   -- 4,626,310.94 − 277,578.66 (enganche) − 775,000.00 (mensualidades) = 3,573,732.28
   INSERT INTO public.acuerdos_pago
     (id_cuenta_cobranza, id_concepto, monto, fecha_pago, orden, pago_completado, activo)
   VALUES
     (1761, 3, 3573732.28, NULL, 34, false, true);
 
-  -- ─── PASO 5: Recalcular pago_completado ─────────────────────────────────────
+  -- Recalcular pago_completado
   PERFORM public.recalcular_pago_completado_acuerdos(1761);
 
   RAISE NOTICE 'Migración 20260515000005 aplicada correctamente para cuenta_cobranza 1761';
