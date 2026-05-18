@@ -1,0 +1,44 @@
+name: Update Documentation
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  update-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source repo
+        uses: actions/checkout@v4
+
+      - name: Checkout sozu-docs
+        uses: actions/checkout@v4
+        with:
+          repository: jorge-mendoza-corella/sozu-docs
+          token: ${{ secrets.DOCS_REPO_TOKEN }}
+          path: sozu-docs
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: cd sozu-docs && npm install
+
+      - name: Generate documentation
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          cd sozu-docs
+          npm run generate-docs -- --source ../ --repo sozu-supabase-migrations
+
+      - name: Commit and push docs
+        run: |
+          cd sozu-docs
+          git config user.name "Doc Bot"
+          git config user.email "noreply@sozu.com"
+          git add docs/
+          git diff --staged --quiet && echo "Sin cambios en docs" && exit 0
+          git commit -m "auto: update docs from sozu-supabase-migrations@$(echo ${{ github.sha }} | cut -c1-7)"
+          git push
