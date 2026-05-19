@@ -1,6 +1,9 @@
 -- Paso 1: Habilitar pg_net (extensión para HTTP desde PostgreSQL)
 CREATE EXTENSION IF NOT EXISTS pg_net;
 
+-- Crear schema private si no existe
+CREATE SCHEMA IF NOT EXISTS private;
+
 -- Paso 2: Tabla de configuración para guardar el service_role_key
 -- No requiere permisos especiales. Solo el rol postgres puede leerla (SECURITY DEFINER).
 CREATE TABLE IF NOT EXISTS private.sozu_config (
