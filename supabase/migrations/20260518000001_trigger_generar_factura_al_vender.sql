@@ -1,14 +1,24 @@
 -- Paso 1: Habilitar pg_net (extensión para HTTP desde PostgreSQL)
 CREATE EXTENSION IF NOT EXISTS pg_net;
 
--- Paso 2: Configurar el service_role_key como parámetro de la BD
--- IMPORTANTE: Reemplazar <SERVICE_ROLE_KEY> con el valor real de:
---   Supabase Dashboard → Settings → API → "service_role" (el campo secreto)
--- Ejecutar esto ANTES de aplicar la migración:
---   ALTER DATABASE postgres SET app.service_role_key = '<SERVICE_ROLE_KEY>';
---   SELECT pg_reload_conf();
+-- Paso 2: Tabla de configuración para guardar el service_role_key
+-- No requiere permisos especiales. Solo el rol postgres puede leerla (SECURITY DEFINER).
+CREATE TABLE IF NOT EXISTS private.sozu_config (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 
--- Paso 3: Modificar verificar_propiedad_vendida para llamar a la edge function
+-- Ejecutar esto UNA SOLA VEZ para guardar el key
+-- (reemplazar con el valor real de Dashboard → Settings → API → "service_role")
+-- INSERT INTO private.sozu_config (key, value) VALUES ('edge_function_key', '<SERVICE_ROLE_KEY>');
+
+-- Paso 3: Función auxiliar para leer el key de forma segura
+CREATE OR REPLACE FUNCTION private.get_edge_function_key()
+RETURNS TEXT AS $$
+    SELECT value FROM private.sozu_config WHERE key = 'edge_function_key' LIMIT 1;
+$$ LANGUAGE sql SECURITY DEFINER STABLE;
+
+-- Paso 4: Modificar verificar_propiedad_vendida para llamar a la edge function
 CREATE OR REPLACE FUNCTION public.verificar_propiedad_vendida()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -19,6 +29,7 @@ DECLARE
     tiene_enganche_pagado BOOLEAN := FALSE;
     v_id_edificio_modelo INTEGER;
     v_cuenta_id INTEGER;
+    v_key TEXT;
 BEGIN
     IF TG_TABLE_NAME = 'documentos' THEN
         v_propiedad_id := NEW.id_propiedad;
@@ -56,7 +67,7 @@ BEGIN
             WHERE o.id_propiedad = v_propiedad_id AND cc.activo = TRUE
         );
 
-        -- Obtener la cuenta de cobranza principal para disparar la factura
+        -- Obtener la cuenta de cobranza principal
         SELECT cc.id INTO v_cuenta_id
         FROM cuentas_cobranza cc
         JOIN ofertas o ON cc.id_oferta = o.id
@@ -66,16 +77,19 @@ BEGIN
         ORDER BY cc.id DESC
         LIMIT 1;
 
-        -- Llamar a la edge function de forma asíncrona (fire and forget)
+        -- Llamar a la edge function (fire and forget)
         IF v_cuenta_id IS NOT NULL THEN
-            PERFORM net.http_post(
-                url     := 'https://tzmhgfjmddkfyffkkmto.supabase.co/functions/v1/generar-factura-comision-sozu',
-                headers := jsonb_build_object(
-                    'Content-Type',  'application/json',
-                    'Authorization', 'Bearer ' || current_setting('app.service_role_key', true)
-                ),
-                body    := jsonb_build_object('id_cuenta_cobranza', v_cuenta_id)
-            );
+            v_key := private.get_edge_function_key();
+            IF v_key IS NOT NULL THEN
+                PERFORM net.http_post(
+                    url     := 'https://tzmhgfjmddkfyffkkmto.supabase.co/functions/v1/generar-factura-comision-sozu',
+                    headers := jsonb_build_object(
+                        'Content-Type',  'application/json',
+                        'Authorization', 'Bearer ' || v_key
+                    ),
+                    body    := jsonb_build_object('id_cuenta_cobranza', v_cuenta_id)
+                );
+            END IF;
         END IF;
     END IF;
 
