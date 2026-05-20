@@ -3,6 +3,12 @@
 -- Se agregan tipos_documento específicos para este módulo.
 
 -- ── 1. Nuevos tipos de documento para demandas ───────────────────────────────
+-- Sincronizar secuencia antes de insertar para evitar conflictos de PK
+SELECT setval(
+  pg_get_serial_sequence('public.tipos_documento', 'id'),
+  (SELECT MAX(id) FROM public.tipos_documento)
+);
+
 INSERT INTO public.tipos_documento (nombre, activo, id_categoria_documento)
 VALUES
   ('Escrito de demanda',      true, 9),
