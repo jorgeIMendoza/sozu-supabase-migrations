@@ -1,12 +1,7 @@
 -- Módulo de Entregas de Departamentos
--- 6 tablas: entregas, checklist_categorias, checklist_items,
---           evidencia, observaciones, firmas
+-- Tablas: entregas, checklist_categorias, checklist_items,
+--         evidencia, observaciones, firmas
 -- Reutiliza set_fecha_actualizacion() creada en 20260519000001.
-
--- ── 1. Nuevo tipo de documento para acta de entrega ──────────────────────────
-INSERT INTO public.tipos_documento (nombre, activo)
-VALUES ('Acta de entrega', true)
-ON CONFLICT (nombre) DO NOTHING;
 
 -- ── 2. Tabla principal de entregas ───────────────────────────────────────────
 CREATE TABLE public.entregas (
@@ -14,9 +9,9 @@ CREATE TABLE public.entregas (
   id_propiedad         INTEGER      NOT NULL REFERENCES public.propiedades(id),
   id_cuenta_cobranza   BIGINT                REFERENCES public.cuentas_cobranza(id),
   id_proyecto          INTEGER               REFERENCES public.proyectos(id),
-  estatus              TEXT         NOT NULL DEFAULT 'LISTO'
+  estatus              TEXT         NOT NULL DEFAULT 'PROGRAMADA'
                          CHECK (estatus IN (
-                           'LISTO','PROGRAMADA','EN_PROCESO',
+                           'PROGRAMADA','EN_PROCESO',
                            'ENTREGADA','CON_OBSERVACIONES','REPROGRAMADA'
                          )),
   fecha_programada     DATE,
@@ -24,15 +19,10 @@ CREATE TABLE public.entregas (
   entregado_por        TEXT,
   punto_reunion        TEXT,
   telefono_contacto    TEXT,
-  checklist_pct        NUMERIC(5,2) NOT NULL DEFAULT 0
-                         CHECK (checklist_pct >= 0 AND checklist_pct <= 100),
-  daiku_estatus        TEXT         NOT NULL DEFAULT 'NO_APLICA'
-                         CHECK (daiku_estatus IN (
+  muebles_daiku_estatus TEXT        NOT NULL DEFAULT 'NO_APLICA'
+                         CHECK (muebles_daiku_estatus IN (
                            'NO_APLICA','PENDIENTE','EN_INSTALACION','COMPLETADO'
                          )),
-  acta_estatus         TEXT         NOT NULL DEFAULT 'PENDIENTE'
-                         CHECK (acta_estatus IN ('PENDIENTE','GENERADA','FIRMADA')),
-  acta_url             TEXT,
   activo               BOOLEAN      NOT NULL DEFAULT true,
   fecha_creacion       TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
   fecha_actualizacion  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
