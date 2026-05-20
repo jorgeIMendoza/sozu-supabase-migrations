@@ -3,11 +3,11 @@
 -- Se agregan tipos_documento específicos para este módulo.
 
 -- ── 1. Nuevos tipos de documento para demandas ───────────────────────────────
-INSERT INTO public.tipos_documento (nombre, activo)
+INSERT INTO public.tipos_documento (nombre, activo, id_categoria_documento)
 VALUES
-  ('Escrito de demanda',      true),
-  ('Acuerdo extrajudicial',   true),
-  ('Resolución judicial',     true)
+  ('Escrito de demanda',      true, 9),
+  ('Acuerdo extrajudicial',   true, 9),
+  ('Resolución judicial',     true, 9)
 ON CONFLICT (nombre) DO NOTHING;
 
 -- ── 2. Función para fecha_actualizacion automática ───────────────────────────
