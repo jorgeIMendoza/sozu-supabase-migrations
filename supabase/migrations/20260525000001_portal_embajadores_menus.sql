@@ -8,7 +8,7 @@ BEGIN;
 -- 1. Menú principal
 INSERT INTO public.menus (id, nombre, activo, orden)
 OVERRIDING SYSTEM VALUE
-VALUES (22, 'Portal Embajadores', true, 15)
+VALUES (22, 'Embajadores', true, 15)
 ON CONFLICT (id) DO UPDATE SET
   nombre = EXCLUDED.nombre,
   activo = true,
