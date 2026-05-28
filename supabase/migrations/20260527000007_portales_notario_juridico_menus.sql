@@ -50,7 +50,7 @@ SELECT setval(pg_get_serial_sequence('public.menus', 'id'),
 INSERT INTO public.submenus (id, menu_id, nombre, vista_front_end, activo, orden, solo_usuarioa)
 OVERRIDING SYSTEM VALUE
 VALUES (165, 25, 'Inicio',
-        '/admin/portal-escrituracion/app-notaria',
+        '/admin/portal-notaria/inicio',
         true, 1, true)
 ON CONFLICT (id) DO NOTHING;
 
@@ -58,7 +58,7 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO public.submenus (id, menu_id, nombre, vista_front_end, activo, orden, solo_usuarioa)
 OVERRIDING SYSTEM VALUE
 VALUES (166, 26, 'Inicio',
-        '/admin/portal-escrituracion/app-juridico',
+        '/admin/portal-juridico/inicio',
         true, 1, true)
 ON CONFLICT (id) DO NOTHING;
 
@@ -66,7 +66,7 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO public.submenus (id, menu_id, nombre, vista_front_end, activo, orden, solo_usuarioa)
 OVERRIDING SYSTEM VALUE
 VALUES (167, 27, 'Administrar Notarios',
-        '/admin/portal-escrituracion/notarios',
+        '/admin/notarios/administrar',
         true, 1, false)
 ON CONFLICT (id) DO NOTHING;
 
@@ -74,7 +74,7 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO public.submenus (id, menu_id, nombre, vista_front_end, activo, orden, solo_usuarioa)
 OVERRIDING SYSTEM VALUE
 VALUES (168, 28, 'Administrar Jurídico',
-        '/admin/portal-escrituracion/app-juridico',
+        '/admin/juridico/administrar',
         true, 1, false)
 ON CONFLICT (id) DO NOTHING;
 
