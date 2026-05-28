@@ -41,4 +41,5 @@ jobs:
           git add docs/
           git diff --staged --quiet && echo "Sin cambios en docs" && exit 0
           git commit -m "auto: update docs from sozu-supabase-migrations@$(echo ${{ github.sha }} | cut -c1-7)"
+          git pull --rebase origin main
           git push
