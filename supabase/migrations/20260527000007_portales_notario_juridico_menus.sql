@@ -49,7 +49,7 @@ SELECT setval(pg_get_serial_sequence('public.menus', 'id'),
 -- Submenú Portal Notario (id=165) — solo_usuarioa=true (igual que Portal Embajadores)
 INSERT INTO public.submenus (id, menu_id, nombre, vista_front_end, activo, orden, solo_usuarioa)
 OVERRIDING SYSTEM VALUE
-VALUES (165, 25, 'App Notaría',
+VALUES (165, 25, 'Inicio',
         '/admin/portal-escrituracion/app-notaria',
         true, 1, true)
 ON CONFLICT (id) DO NOTHING;
@@ -57,7 +57,7 @@ ON CONFLICT (id) DO NOTHING;
 -- Submenú Portal Jurídico (id=166) — solo_usuarioa=true
 INSERT INTO public.submenus (id, menu_id, nombre, vista_front_end, activo, orden, solo_usuarioa)
 OVERRIDING SYSTEM VALUE
-VALUES (166, 26, 'App Jurídico',
+VALUES (166, 26, 'Inicio',
         '/admin/portal-escrituracion/app-juridico',
         true, 1, true)
 ON CONFLICT (id) DO NOTHING;
