@@ -312,9 +312,29 @@ VALUES
 
 
 -- ============================================================
--- PASO 10 — Actualizar get_current_user_profile
+-- PASO 10a — Agregar id_notario a usuarios (si no existe)
+-- Columna añadida en prod por modulo_app_notaria; se garantiza
+-- aquí con IF NOT EXISTS para que dev/localhost no falle.
+-- ============================================================
+
+ALTER TABLE public.usuarios
+  ADD COLUMN IF NOT EXISTS id_notario INTEGER
+    REFERENCES public.notarios(id)
+    ON DELETE SET NULL;
+
+COMMENT ON COLUMN public.usuarios.id_notario IS
+  'FK hacia notarios. Vincula el usuario con su perfil de notario. NULL para todos los demás roles.';
+
+CREATE INDEX IF NOT EXISTS idx_usuarios_id_notario
+  ON public.usuarios(id_notario)
+  WHERE id_notario IS NOT NULL;
+
+
+-- ============================================================
+-- PASO 10b — Actualizar get_current_user_profile
 -- El perfil jurídico se deriva por email (sin FK en usuarios).
--- Requiere columna id_notario en usuarios (modulo_app_notaria).
+-- ver_todos_prospectos_compradores y ver_filtros_avanzados_eliminados
+-- se leen de roles (fuente canónica en el baseline).
 -- ============================================================
 
 DROP FUNCTION IF EXISTS public.get_current_user_profile();
@@ -349,8 +369,8 @@ BEGIN
     u.debe_cambiar_password::BOOLEAN,
     u.id_persona::INTEGER,
     u.activo::BOOLEAN,
-    u.ver_todos_prospectos_compradores::BOOLEAN,
-    u.ver_filtros_avanzados_eliminados::BOOLEAN,
+    COALESCE(r.ver_todos_prospectos_compradores, false)::BOOLEAN,
+    COALESCE(r.ver_filtros_avanzados_eliminados, true)::BOOLEAN,
     u.id_notario::INTEGER,
     n.notaria::TEXT                         AS notaria_nombre,
     j.id::BIGINT                            AS id_perfil_juridico,
