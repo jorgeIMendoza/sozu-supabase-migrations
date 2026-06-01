@@ -160,4 +160,11 @@ jobs:
           supabase migration repair --status applied \
             20260513000000 20260513000001 20260513000002 20260513000003
 
+          # Versiones aplicadas manualmente en prod fuera del repo (drift):
+          # no existen como archivos locales, así que db push se detiene.
+          # Se marcan reverted para que el push pueda continuar. Si sus
+          # cambios deben quedar versionados, recrearlos como migración.
+          supabase migration repair --status reverted \
+            20260529142557 20260529175147
+
           supabase db push --yes
