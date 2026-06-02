@@ -165,6 +165,7 @@ jobs:
           # Se marcan reverted para que el push pueda continuar. Si sus
           # cambios deben quedar versionados, recrearlos como migración.
           supabase migration repair --status reverted \
-            20260529142557 20260529175147
+            20260529142557 20260529175147 \
+            20260602111211 20260602111641 20260602112828 20260602115424 20260602135443 20260602135447
 
           supabase db push --yes
