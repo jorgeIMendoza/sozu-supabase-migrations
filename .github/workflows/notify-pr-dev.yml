@@ -1,0 +1,36 @@
+# Notifica por WhatsApp cuando se abre un PR hacia `dev` desde fuera del dashboard.
+#
+# Colocar este archivo como `.github/workflows/notify-pr-dev.yml` en CADA repo
+# monitoreado:
+#   - jorgeIMendoza/sozu-admin
+#   - jorgeIMendoza/sozu-supabase-migrations
+#   - jorgeIMendoza/sozu-edge-functions
+#   - jorgeIMendoza/sozu-n8n-workflows
+#   - sozu-com/server-stp
+#
+# Variables que llena el evento de GitHub:
+#   - $repositorio   -> ${{ github.event.repository.name }}
+#   - $quien_genera  -> ${{ github.actor }}  (autor del PR)
+
+name: Notificar PR a dev (WhatsApp)
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review]
+    branches: [dev]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enviar WhatsApp
+        env:
+          N8N_WEBHOOK: https://automatizacion-n8n.fbqqbe.easypanel.host/webhook/manda_notificacion
+          N8N_APIKEY: 80FA62E3FD0C-4477-8B31-8A2CD6AF7B57
+          # Número fijo del administrador que recibe el aviso de PR.
+          DESTINO: "+5217221514185"
+        run: |
+          curl -s -X POST "$N8N_WEBHOOK" \
+            -H "apikey: $N8N_APIKEY" \
+            -H "Content-Type: application/json" \
+            -d "{\"tipo\":\"wa\",\"telefono\":\"${DESTINO}\",\"mensajeWA\":\"Hay un PR para DEV del repo: ${{ github.event.repository.name }}, lo generó: ${{ github.actor }}\",\"instanciaWA\":\"Pruebas de todo\"}"
