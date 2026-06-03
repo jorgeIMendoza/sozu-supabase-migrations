@@ -169,3 +169,23 @@ jobs:
             20260602111211 20260602111641 20260602112828 20260602115424 20260602135443 20260602135447
 
           supabase db push --yes
+
+      - name: Autenticar a Google Cloud (Firestore)
+        if: success()
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_GCP_DEV }}
+
+      - name: Configurar gcloud
+        if: success()
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Notificar deploy listo (WhatsApp)
+        if: success()
+        env:
+          ENVIRONMENT: PROD
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FIRESTORE_PROJECT: sozu-admin-dev
+          N8N_WEBHOOK: https://automatizacion-n8n.fbqqbe.easypanel.host/webhook/manda_notificacion
+          N8N_APIKEY: 80FA62E3FD0C-4477-8B31-8A2CD6AF7B57
+        run: bash ci/notify-deploy.sh
