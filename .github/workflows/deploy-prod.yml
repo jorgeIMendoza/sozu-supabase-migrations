@@ -168,7 +168,10 @@ jobs:
             20260529142557 20260529175147 \
             20260602111211 20260602111641 20260602112828 20260602115424 20260602135443 20260602135447
 
-          supabase db push --yes
+          # --include-all: aplica migraciones out-of-order (versiones con timestamp
+          # anterior al último aplicado en remoto). Necesario cuando se recupera una
+          # migración de drift con timestamp previo al último deploy.
+          supabase db push --yes --include-all
 
       - name: Autenticar a Google Cloud (Firestore)
         if: success()
