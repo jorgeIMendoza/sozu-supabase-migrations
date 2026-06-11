@@ -31,6 +31,15 @@ set -euo pipefail
 ADMIN_PHONE="${ADMIN_PHONE:-+5217221514185}"
 REPO_NAME="${GITHUB_REPOSITORY##*/}"
 
+# Resultado del job (lo inyecta el workflow via STATUS: ${{ job.status }})
+STATUS="${STATUS:-success}"
+RUN_URL="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID:-}"
+if [ "$STATUS" = "success" ]; then
+  MENSAJE="Ha quedado listo tu deploy en ${ENVIRONMENT} del repo ${REPO_NAME}, puedes revisar"
+else
+  MENSAJE="FALLO el deploy en ${ENVIRONMENT} del repo ${REPO_NAME}. Logs: ${RUN_URL}"
+fi
+
 API="https://api.github.com"
 gh() { curl -s -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$@"; }
 
@@ -38,7 +47,7 @@ send_wa() { # $1 = teléfono E.164 ; $2 = etiqueta para log
   curl -s -X POST "$N8N_WEBHOOK" \
     -H "apikey: $N8N_APIKEY" \
     -H "Content-Type: application/json" \
-    -d "{\"tipo\":\"wa\",\"telefono\":\"$1\",\"mensajeWA\":\"Ha quedado listo tu deploy en ${ENVIRONMENT} del repo ${REPO_NAME}, puedes revisar\",\"instanciaWA\":\"Pruebas de todo\"}" \
+    -d "{\"tipo\":\"wa\",\"telefono\":\"$1\",\"mensajeWA\":\"${MENSAJE}\",\"instanciaWA\":\"Pruebas de todo\"}" \
     >/dev/null && echo "Notificado $2 ($1)" || echo "Fallo al notificar $2 ($1)"
 }
 

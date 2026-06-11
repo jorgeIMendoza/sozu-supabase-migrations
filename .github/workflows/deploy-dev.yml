@@ -12,7 +12,9 @@ jobs:
 
       - uses: supabase/setup-cli@v1
         with:
-          version: latest
+          # Versión fija: "latest" resuelve via API de GitHub sin token y truena
+          # con "rate limit exceeded" en runners compartidos.
+          version: 2.105.0
 
       - name: Instalar cliente PostgreSQL
         run: sudo apt-get install -y postgresql-client -q
@@ -41,22 +43,23 @@ jobs:
         run: supabase db push --db-url "${{ secrets.DEV_DB_URL }}" --include-all
 
       - name: Autenticar a Google Cloud (Firestore)
-        if: success()
+        if: always()
         continue-on-error: true
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.FIREBASE_GCP_DEV }}
 
       - name: Configurar gcloud
-        if: success()
+        if: always()
         continue-on-error: true
         uses: google-github-actions/setup-gcloud@v2
 
       - name: Notificar deploy listo (WhatsApp)
-        if: success()
+        if: always()
         continue-on-error: true
         env:
           ENVIRONMENT: DEV
+          STATUS: ${{ job.status }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           FIRESTORE_PROJECT: sozu-admin-dev
           N8N_WEBHOOK: https://automatizacion-n8n.fbqqbe.easypanel.host/webhook/manda_notificacion
