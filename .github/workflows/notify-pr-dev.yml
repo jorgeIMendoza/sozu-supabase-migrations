@@ -1,4 +1,7 @@
-# Notifica por WhatsApp cuando se abre un PR hacia `dev` desde fuera del dashboard.
+# Notifica por WhatsApp sobre PRs:
+#   - Abierto hacia `dev`  -> avisa al admin (comportamiento original).
+#   - Cerrado (con o sin merge) hacia `dev` o `main` -> avisa al AUTOR del PR
+#     (teléfono en Firestore contributors/{login}.telefonoWhatsapp) y al admin.
 #
 # Colocar este archivo como `.github/workflows/notify-pr-dev.yml` en CADA repo
 # monitoreado:
@@ -7,23 +10,21 @@
 #   - jorgeIMendoza/sozu-edge-functions
 #   - jorgeIMendoza/sozu-n8n-workflows
 #   - sozu-com/server-stp
-#
-# Variables que llena el evento de GitHub:
-#   - $repositorio   -> ${{ github.event.repository.name }}
-#   - $quien_genera  -> ${{ github.actor }}  (autor del PR)
 
-name: Notificar PR a dev (WhatsApp)
+name: Notificar PR (WhatsApp)
 
 on:
   pull_request:
-    types: [opened, reopened, ready_for_review]
-    branches: [dev]
+    types: [opened, reopened, ready_for_review, closed]
+    branches: [dev, main]
 
 jobs:
-  notify:
+  notify-abierto:
+    # Solo PRs abiertos hacia dev (igual que antes)
+    if: github.event.action != 'closed' && github.event.pull_request.base.ref == 'dev'
     runs-on: ubuntu-latest
     steps:
-      - name: Enviar WhatsApp
+      - name: Enviar WhatsApp (admin)
         env:
           N8N_WEBHOOK: https://automatizacion-n8n.fbqqbe.easypanel.host/webhook/manda_notificacion
           N8N_APIKEY: 80FA62E3FD0C-4477-8B31-8A2CD6AF7B57
@@ -34,3 +35,58 @@ jobs:
             -H "apikey: $N8N_APIKEY" \
             -H "Content-Type: application/json" \
             -d "{\"tipo\":\"wa\",\"telefono\":\"${DESTINO}\",\"mensajeWA\":\"Hay un PR para DEV del repo: ${{ github.event.repository.name }}, lo generó: ${{ github.actor }}\",\"instanciaWA\":\"Pruebas de todo\"}"
+
+  notify-cerrado:
+    # PR cerrado (mergeado o no) hacia dev o main -> avisa al autor + admin
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Autenticar a Google Cloud (Firestore)
+        continue-on-error: true
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_GCP_DEV }}
+
+      - name: Configurar gcloud
+        continue-on-error: true
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Enviar WhatsApp (autor y admin)
+        env:
+          N8N_WEBHOOK: https://automatizacion-n8n.fbqqbe.easypanel.host/webhook/manda_notificacion
+          N8N_APIKEY: 80FA62E3FD0C-4477-8B31-8A2CD6AF7B57
+          ADMIN: "+5217221514185"
+          FIRESTORE_PROJECT: sozu-admin-dev
+          AUTOR: ${{ github.event.pull_request.user.login }}
+          PR_NUM: ${{ github.event.number }}
+          MERGED: ${{ github.event.pull_request.merged }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+          REPO: ${{ github.event.repository.name }}
+          CERRADO_POR: ${{ github.actor }}
+        run: |
+          if [ "$MERGED" = "true" ]; then
+            MSG="Tu PR #${PR_NUM} del repo ${REPO} fue MERGEADO a ${BASE} por ${CERRADO_POR}"
+          else
+            MSG="Tu PR #${PR_NUM} del repo ${REPO} (hacia ${BASE}) fue CERRADO sin merge por ${CERRADO_POR}"
+          fi
+          send() {
+            PAYLOAD=$(jq -n --arg tel "$1" --arg msg "$MSG" \
+              '{tipo:"wa",telefono:$tel,mensajeWA:$msg,instanciaWA:"Pruebas de todo"}')
+            curl -s -X POST "$N8N_WEBHOOK" \
+              -H "apikey: $N8N_APIKEY" \
+              -H "Content-Type: application/json" \
+              -d "$PAYLOAD" >/dev/null
+          }
+          # Teléfono del autor desde Firestore (lectura admin vía service account)
+          PHONE=""
+          if ACCESS_TOKEN="$(gcloud auth print-access-token 2>/dev/null)"; then
+            PHONE="$(curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
+              "https://firestore.googleapis.com/v1/projects/${FIRESTORE_PROJECT}/databases/(default)/documents/contributors/${AUTOR}" \
+              | jq -r '.fields.telefonoWhatsapp.stringValue // empty')"
+          fi
+          if [ -n "$PHONE" ]; then
+            send "+521${PHONE}" && echo "Notificado autor ${AUTOR}"
+          else
+            echo "Sin teléfono guardado para '${AUTOR}'; solo se avisa al admin."
+          fi
+          send "$ADMIN" && echo "Notificado admin"
