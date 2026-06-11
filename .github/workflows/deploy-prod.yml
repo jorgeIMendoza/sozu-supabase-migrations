@@ -12,7 +12,9 @@ jobs:
 
       - uses: supabase/setup-cli@v1
         with:
-          version: latest
+          # Versión fija: "latest" resuelve via API de GitHub sin token y truena
+          # con "rate limit exceeded" en runners compartidos.
+          version: 2.105.0
 
       - name: Deploy migrations to production
         env:
