@@ -28,13 +28,25 @@ jobs:
         env:
           N8N_WEBHOOK: https://automatizacion-n8n.fbqqbe.easypanel.host/webhook/manda_notificacion
           N8N_APIKEY: 80FA62E3FD0C-4477-8B31-8A2CD6AF7B57
-          # Número fijo del administrador que recibe el aviso de PR.
           DESTINO: "+5217221514185"
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUM: ${{ github.event.number }}
+          REPO_FULL: ${{ github.repository }}
+          REPO_NAME: ${{ github.event.repository.name }}
+          ACTOR: ${{ github.actor }}
         run: |
+          # Detectar autor real desde el body del PR si tiene <!-- pr_author: login -->
+          PR_BODY="$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${REPO_FULL}/pulls/${PR_NUM}" \
+            | jq -r '.body // ""')"
+          AUTOR_REAL="$(printf '%s' "$PR_BODY" \
+            | grep -oP '(?<=<!-- pr_author: )[\w.-]+(?= -->)' 2>/dev/null | head -1 || true)"
+          AUTOR="${AUTOR_REAL:-$ACTOR}"
           curl -s -X POST "$N8N_WEBHOOK" \
             -H "apikey: $N8N_APIKEY" \
             -H "Content-Type: application/json" \
-            -d "{\"tipo\":\"wa\",\"telefono\":\"${DESTINO}\",\"mensajeWA\":\"Hay un PR para DEV del repo: ${{ github.event.repository.name }}, lo generó: ${{ github.actor }}\",\"instanciaWA\":\"Pruebas de todo\"}"
+            -d "{\"tipo\":\"wa\",\"telefono\":\"${DESTINO}\",\"mensajeWA\":\"Hay un PR para DEV del repo: ${REPO_NAME}, lo generó: ${AUTOR}\",\"instanciaWA\":\"Pruebas de todo\"}"
 
   notify-cerrado:
     # PR cerrado (mergeado o no) hacia dev o main -> avisa al autor + admin
@@ -57,13 +69,26 @@ jobs:
           N8N_APIKEY: 80FA62E3FD0C-4477-8B31-8A2CD6AF7B57
           ADMIN: "+5217221514185"
           FIRESTORE_PROJECT: sozu-admin-dev
-          AUTOR: ${{ github.event.pull_request.user.login }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR_LOGIN: ${{ github.event.pull_request.user.login }}
           PR_NUM: ${{ github.event.number }}
           MERGED: ${{ github.event.pull_request.merged }}
           BASE: ${{ github.event.pull_request.base.ref }}
           REPO: ${{ github.event.repository.name }}
+          REPO_FULL: ${{ github.repository }}
           CERRADO_POR: ${{ github.actor }}
         run: |
+          # Detectar autor real: preferir <!-- pr_author: login --> del body del PR
+          # (embebido por el dashboard al crear el PR en repos de infra)
+          PR_BODY="$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${REPO_FULL}/pulls/${PR_NUM}" \
+            | jq -r '.body // ""')"
+          PR_AUTHOR_OVERRIDE="$(printf '%s' "$PR_BODY" \
+            | grep -oP '(?<=<!-- pr_author: )[\w.-]+(?= -->)' 2>/dev/null | head -1 || true)"
+          AUTOR="${PR_AUTHOR_OVERRIDE:-$ACTOR_LOGIN}"
+          echo "Autor PR: ${ACTOR_LOGIN} → autor real notificado: ${AUTOR}"
+
           if [ "$MERGED" = "true" ]; then
             MSG="Tu PR #${PR_NUM} del repo ${REPO} fue MERGEADO a ${BASE} por ${CERRADO_POR}"
           else
