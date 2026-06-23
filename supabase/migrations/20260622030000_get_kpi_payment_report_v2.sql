@@ -1,6 +1,11 @@
 -- get_kpi_payment_report v2: + id_cuenta_cobranza, nombre_beneficiario, banco_origen.
 -- Fecha: 2026-06-22
 --
+-- NOTA: renombrada de 20260622020000 → 20260622030000 para resolver colisión de
+-- timestamp con 20260622020000_notif_contrato_firmado_schema (otra rama, ya aplicada
+-- en prod). Dos archivos con el mismo prefijo = misma version (PK schema_migrations)
+-- → el deploy fallaba con "duplicate key ... schema_migrations_pkey".
+--
 -- El reporte KPI Excel necesita 3 campos extra para detectar patrones de pago:
 --   id_cuenta_cobranza  → cc.id (siempre presente)
 --   nombre_beneficiario → psr.nombre_beneficiario (empresa SOZU receptora; NULL en efectivo/cheque)
