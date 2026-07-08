@@ -158,8 +158,9 @@ SELECT jsonb_build_object(
       'frase_perfil',    u.frase_perfil,
       'id_persona',      u.id_persona,
       'nombre_legal',    p.nombre_legal,
-      'telefono',        p.telefono,
-      'clave_pais',      p.clave_pais_telefono
+      -- Telefono: preferir el de usuarios; si no, el de la persona vinculada.
+      'telefono',        COALESCE(u.telefono, p.telefono),
+      'clave_pais',      COALESCE(u.clave_pais_telefono, p.clave_pais_telefono)
     )
     FROM usuarios u
     LEFT JOIN personas p ON p.id = u.id_persona
