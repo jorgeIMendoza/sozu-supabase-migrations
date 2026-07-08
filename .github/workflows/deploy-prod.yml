@@ -9,6 +9,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # El notify de PROD necesita HEAD^1 (tip anterior de main) para
+          # listar a TODOS los autores de PRs del release; depth 1 lo rompe.
+          fetch-depth: 2
 
       - uses: supabase/setup-cli@v1
         with:
