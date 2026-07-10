@@ -109,7 +109,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_bancos_solicitudes_vigente
 -- Paso 3 — Trigger fecha_actualizacion (convencion del repo)
 -- =====================================================================
 
-CREATE TRIGGER update_bancos_solicitudes_updated_at
+CREATE OR REPLACE TRIGGER update_bancos_solicitudes_updated_at
   BEFORE UPDATE ON public.bancos_solicitudes
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
@@ -130,6 +130,7 @@ CREATE TRIGGER update_bancos_solicitudes_updated_at
 
 ALTER TABLE public.bancos_solicitudes ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS bancos_solicitudes_rw ON public.bancos_solicitudes;
 CREATE POLICY bancos_solicitudes_rw ON public.bancos_solicitudes
   FOR ALL
   TO authenticated
