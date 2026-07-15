@@ -2,7 +2,10 @@
 -- Los datos de contacto (nombre, email, teléfono) viven en `personas`; la relación
 -- prospecto/comprador ↔ proyecto vive en `entidades_relacionadas`. Esta tabla SOLO
 -- guarda el estado del lead en el CRM y la atribución de Meta, enlazada por
--- `id_entidad_relacionada`.
+-- `id_entidad_relacionada` (una fila por contacto).
+--
+-- Nota: reemplaza la versión previa con timestamp 20260715000000, que colisionaba
+-- con otra migración ya aplicada en dev (schema_migrations_pkey duplicada).
 
 -- ─── 1. Tabla principal ───────────────────────────────────────────────────────
 CREATE TABLE public.crm_leads_atribucion (
@@ -29,13 +32,13 @@ CREATE TABLE public.crm_leads_atribucion (
 
     activo                  BOOLEAN      NOT NULL DEFAULT TRUE,
     fecha_creacion          TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-    fecha_actualizacion     TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+    fecha_actualizacion     TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+
+    -- Una fila de atribución/estado por contacto (permite upsert por contacto).
+    CONSTRAINT crm_leads_atr_er_unica UNIQUE (id_entidad_relacionada)
 );
 
 -- ─── 2. Índices ───────────────────────────────────────────────────────────────
-CREATE INDEX idx_crm_leads_atr_er
-    ON public.crm_leads_atribucion (id_entidad_relacionada);
-
 CREATE UNIQUE INDEX idx_crm_leads_atr_leadgen
     ON public.crm_leads_atribucion (meta_leadgen_id)
     WHERE meta_leadgen_id IS NOT NULL;
