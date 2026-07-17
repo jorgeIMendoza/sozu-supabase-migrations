@@ -55,11 +55,24 @@ send_wa() { # $1 = teléfono E.164 ; $2 = etiqueta para log
     >/dev/null && echo "Notificado $2 ($1)" || echo "Fallo al notificar $2 ($1)"
 }
 
-# Extrae el login real del body del PR si tiene <!-- pr_author: login -->
+# Extrae TODOS los logins del body del PR con líneas <!-- pr_author: login -->
+# (el dashboard embebe una línea por autor real de los commits).
 # $1 = body en base64 (para evitar problemas con caracteres especiales)
-extract_pr_author_b64() {
+extract_pr_authors_b64() {
   printf '%s' "$1" | base64 -d 2>/dev/null \
-    | grep -oP '(?<=<!-- pr_author: )[\w.-]+(?= -->)' 2>/dev/null | head -1 || true
+    | grep -oP '(?<=<!-- pr_author: )[\w.-]+(?= -->)' 2>/dev/null | sort -u || true
+}
+
+# Agrega al array logins todos los autores del PR: los pr_author del body,
+# o el creador del PR si no hay marcadores.
+add_pr_authors() { # $1 = login creador ; $2 = body en base64
+  local marcados
+  marcados="$(extract_pr_authors_b64 "$2")"
+  if [ -n "$marcados" ]; then
+    while IFS= read -r l; do [ -n "$l" ] && logins+=("$l"); done <<< "$marcados"
+  elif [ -n "$1" ]; then
+    logins+=("$1")
+  fi
 }
 
 logins=()
@@ -72,11 +85,9 @@ if [ "$ENVIRONMENT" = "PROD" ]; then
   if [ -n "$PREV_MAIN_DATE" ]; then
     echo "Buscando PRs a dev mergeados después de: ${PREV_MAIN_DATE}"
     PROD_PRS="$(gh_api "$API/repos/$GITHUB_REPOSITORY/pulls?state=closed&base=dev&sort=updated&direction=desc&per_page=50")"
-    # Procesar cada PR: preferir pr_author del body sobre user.login
+    # Procesar cada PR: todos los pr_author del body (o el creador si no hay)
     while IFS=$'\t' read -r login body_b64; do
-      pr_author="$(extract_pr_author_b64 "$body_b64")"
-      final="${pr_author:-$login}"
-      [ -n "$final" ] && logins+=("$final")
+      add_pr_authors "$login" "$body_b64"
     done < <(echo "$PROD_PRS" | jq -r --arg since "$PREV_MAIN_DATE" \
       '[.[] | select(.merged_at != null and .merged_at > $since)] | .[] |
        [.user.login, (.body // "" | @base64)] | @tsv')
@@ -90,19 +101,15 @@ if [ "$ENVIRONMENT" = "PROD" ]; then
         | jq -r '[.[] | select(.merged_at != null)] | .[0]')"
     a="$(echo "$PR_JSON" | jq -r '.user.login // empty')"
     body_b64="$(echo "$PR_JSON" | jq -r '.body // "" | @base64')"
-    pr_author="$(extract_pr_author_b64 "$body_b64")"
-    final="${pr_author:-$a}"
-    [ -n "$final" ] && logins+=("$final")
+    add_pr_authors "$a" "$body_b64"
   fi
 else
-  # DEV: solo el autor del PR que entró en este push.
+  # DEV: todos los autores del PR que entró en este push.
   PR_JSON="$(gh_api "$API/repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" \
       | jq -r '[.[] | select(.merged_at != null)] | .[0]')"
   a="$(echo "$PR_JSON" | jq -r '.user.login // empty')"
   body_b64="$(echo "$PR_JSON" | jq -r '.body // "" | @base64')"
-  pr_author="$(extract_pr_author_b64 "$body_b64")"
-  final="${pr_author:-$a}"
-  [ -n "$final" ] && logins+=("$final")
+  add_pr_authors "$a" "$body_b64"
 fi
 
 ACCESS_TOKEN="$(gcloud auth print-access-token)"
