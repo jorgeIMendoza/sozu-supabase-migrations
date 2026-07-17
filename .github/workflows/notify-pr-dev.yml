@@ -35,18 +35,19 @@ jobs:
           REPO_NAME: ${{ github.event.repository.name }}
           ACTOR: ${{ github.actor }}
         run: |
-          # Detectar autor real desde el body del PR si tiene <!-- pr_author: login -->
+          # Detectar TODOS los autores reales desde el body (una línea
+          # <!-- pr_author: login --> por autor; el dashboard las embebe).
           PR_BODY="$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/${REPO_FULL}/pulls/${PR_NUM}" \
             | jq -r '.body // ""')"
-          AUTOR_REAL="$(printf '%s' "$PR_BODY" \
-            | grep -oP '(?<=<!-- pr_author: )[\w.-]+(?= -->)' 2>/dev/null | head -1 || true)"
-          AUTOR="${AUTOR_REAL:-$ACTOR}"
+          AUTORES="$(printf '%s' "$PR_BODY" \
+            | grep -oP '(?<=<!-- pr_author: )[\w.-]+(?= -->)' 2>/dev/null | sort -u | paste -sd ', ' || true)"
+          AUTOR="${AUTORES:-$ACTOR}"
           curl -s -X POST "$N8N_WEBHOOK" \
             -H "apikey: $N8N_APIKEY" \
             -H "Content-Type: application/json" \
-            -d "{\"tipo\":\"wa\",\"telefono\":\"${DESTINO}\",\"mensajeWA\":\"Hay un PR para DEV del repo: ${REPO_NAME}, lo generó: ${AUTOR}\",\"instanciaWA\":\"Pruebas de todo\"}"
+            -d "{\"tipo\":\"wa\",\"telefono\":\"${DESTINO}\",\"mensajeWA\":\"Hay un PR para DEV del repo: ${REPO_NAME}, cambios de: ${AUTOR}\",\"instanciaWA\":\"Pruebas de todo\"}"
 
   notify-cerrado:
     # PR cerrado (mergeado o no) hacia dev o main -> avisa al autor + admin
@@ -78,16 +79,16 @@ jobs:
           REPO_FULL: ${{ github.repository }}
           CERRADO_POR: ${{ github.actor }}
         run: |
-          # Detectar autor real: preferir <!-- pr_author: login --> del body del PR
-          # (embebido por el dashboard al crear el PR en repos de infra)
+          # Detectar TODOS los autores reales: líneas <!-- pr_author: login -->
+          # del body (una por autor; el dashboard las embebe según los commits).
           PR_BODY="$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/${REPO_FULL}/pulls/${PR_NUM}" \
             | jq -r '.body // ""')"
-          PR_AUTHOR_OVERRIDE="$(printf '%s' "$PR_BODY" \
-            | grep -oP '(?<=<!-- pr_author: )[\w.-]+(?= -->)' 2>/dev/null | head -1 || true)"
-          AUTOR="${PR_AUTHOR_OVERRIDE:-$ACTOR_LOGIN}"
-          echo "Autor PR: ${ACTOR_LOGIN} → autor real notificado: ${AUTOR}"
+          AUTORES="$(printf '%s' "$PR_BODY" \
+            | grep -oP '(?<=<!-- pr_author: )[\w.-]+(?= -->)' 2>/dev/null | sort -u || true)"
+          if [ -z "$AUTORES" ]; then AUTORES="$ACTOR_LOGIN"; fi
+          echo "Autores a notificar: $(echo "$AUTORES" | paste -sd ', ')"
 
           if [ "$MERGED" = "true" ]; then
             MSG="Tu PR #${PR_NUM} del repo ${REPO} fue MERGEADO a ${BASE} por ${CERRADO_POR}"
@@ -102,16 +103,20 @@ jobs:
               -H "Content-Type: application/json" \
               -d "$PAYLOAD" >/dev/null
           }
-          # Teléfono del autor desde Firestore (lectura admin vía service account)
-          PHONE=""
-          if ACCESS_TOKEN="$(gcloud auth print-access-token 2>/dev/null)"; then
-            PHONE="$(curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
-              "https://firestore.googleapis.com/v1/projects/${FIRESTORE_PROJECT}/databases/(default)/documents/contributors/${AUTOR}" \
-              | jq -r '.fields.telefonoWhatsapp.stringValue // empty')"
-          fi
-          if [ -n "$PHONE" ]; then
-            send "+521${PHONE}" && echo "Notificado autor ${AUTOR}"
-          else
-            echo "Sin teléfono guardado para '${AUTOR}'; solo se avisa al admin."
-          fi
+          # Teléfono de CADA autor desde Firestore (lectura vía service account)
+          ACCESS_TOKEN="$(gcloud auth print-access-token 2>/dev/null || true)"
+          while IFS= read -r AUTOR; do
+            [ -z "$AUTOR" ] && continue
+            PHONE=""
+            if [ -n "$ACCESS_TOKEN" ]; then
+              PHONE="$(curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
+                "https://firestore.googleapis.com/v1/projects/${FIRESTORE_PROJECT}/databases/(default)/documents/contributors/${AUTOR}" \
+                | jq -r '.fields.telefonoWhatsapp.stringValue // empty')"
+            fi
+            if [ -n "$PHONE" ]; then
+              send "+521${PHONE}" && echo "Notificado autor ${AUTOR}"
+            else
+              echo "Sin teléfono guardado para '${AUTOR}'; se omite."
+            fi
+          done <<< "$AUTORES"
           send "$ADMIN" && echo "Notificado admin"
