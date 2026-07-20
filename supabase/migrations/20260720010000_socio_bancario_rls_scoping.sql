@@ -49,7 +49,11 @@ RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS
   );
 $$;
 
-CREATE OR REPLACE FUNCTION public.socio_tiene_propiedad(p_id_propiedad integer)
+-- p_id_propiedad es bigint: propiedades.id es bigint. Los id_propiedad integer de otras
+-- tablas (cuentas_cobranza, ofertas, bodegas, estacionamientos) suben por cast implícito.
+-- DROP de la firma integer previa (si algún ambiente la creó) para no dejar overload duplicado.
+DROP FUNCTION IF EXISTS public.socio_tiene_propiedad(integer);
+CREATE OR REPLACE FUNCTION public.socio_tiene_propiedad(p_id_propiedad bigint)
 RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
   SELECT EXISTS (
     SELECT 1
@@ -72,7 +76,7 @@ $$;
 
 GRANT EXECUTE ON FUNCTION public.socio_tiene_proyecto(integer)  TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.socio_tiene_edificio(integer)  TO anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.socio_tiene_propiedad(integer) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.socio_tiene_propiedad(bigint)  TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.socio_tiene_cuenta(bigint)     TO anon, authenticated;
 
 -- ================================================================
