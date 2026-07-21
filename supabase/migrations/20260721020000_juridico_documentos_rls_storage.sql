@@ -122,46 +122,55 @@ ON CONFLICT (id) DO NOTHING;
 
 -- ================================================================
 -- 5.E — RLS de storage.objects para el bucket documentos-juridicos
+--   storage.objects es propiedad de supabase_storage_admin; el rol de migración puede NO
+--   tener privilegio para ALTER/CREATE POLICY ahí (self-hosted VPS). RLS en storage.objects
+--   ya viene HABILITADO por Supabase (no se hace ALTER ... ENABLE — requiere owner y falla).
+--   Se intentan crear las políticas dentro de un DO que captura insufficient_privilege:
+--   donde el rol sea owner (p. ej. cloud) se crean; donde no, se OMITE con NOTICE y deben
+--   crearse manualmente en el dashboard de Storage (mismas condiciones que abajo).
 -- ================================================================
-ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
+DO $$
+BEGIN
+  DROP POLICY IF EXISTS "juridico_docs_select" ON storage.objects;
+  CREATE POLICY "juridico_docs_select" ON storage.objects
+    FOR SELECT TO authenticated
+    USING (
+      bucket_id = 'documentos-juridicos' AND
+      EXISTS (SELECT 1 FROM public.usuarios u
+              WHERE u.auth_user_id = auth.uid() AND u.rol_id IN (1, 18, 26) AND u.activo = true)
+    );
 
-DROP POLICY IF EXISTS "juridico_docs_select" ON storage.objects;
-CREATE POLICY "juridico_docs_select" ON storage.objects
-  FOR SELECT TO authenticated
-  USING (
-    bucket_id = 'documentos-juridicos' AND
-    EXISTS (SELECT 1 FROM public.usuarios u
-            WHERE u.auth_user_id = auth.uid() AND u.rol_id IN (1, 18, 26) AND u.activo = true)
-  );
+  DROP POLICY IF EXISTS "juridico_docs_insert" ON storage.objects;
+  CREATE POLICY "juridico_docs_insert" ON storage.objects
+    FOR INSERT TO authenticated
+    WITH CHECK (
+      bucket_id = 'documentos-juridicos' AND
+      EXISTS (SELECT 1 FROM public.usuarios u
+              WHERE u.auth_user_id = auth.uid() AND u.rol_id IN (1, 18, 26) AND u.activo = true)
+    );
 
-DROP POLICY IF EXISTS "juridico_docs_insert" ON storage.objects;
-CREATE POLICY "juridico_docs_insert" ON storage.objects
-  FOR INSERT TO authenticated
-  WITH CHECK (
-    bucket_id = 'documentos-juridicos' AND
-    EXISTS (SELECT 1 FROM public.usuarios u
-            WHERE u.auth_user_id = auth.uid() AND u.rol_id IN (1, 18, 26) AND u.activo = true)
-  );
+  DROP POLICY IF EXISTS "juridico_docs_update" ON storage.objects;
+  CREATE POLICY "juridico_docs_update" ON storage.objects
+    FOR UPDATE TO authenticated
+    USING (
+      bucket_id = 'documentos-juridicos' AND
+      EXISTS (SELECT 1 FROM public.usuarios u
+              WHERE u.auth_user_id = auth.uid() AND u.rol_id IN (1, 18, 26) AND u.activo = true)
+    )
+    WITH CHECK (
+      bucket_id = 'documentos-juridicos' AND
+      EXISTS (SELECT 1 FROM public.usuarios u
+              WHERE u.auth_user_id = auth.uid() AND u.rol_id IN (1, 18, 26) AND u.activo = true)
+    );
 
-DROP POLICY IF EXISTS "juridico_docs_update" ON storage.objects;
-CREATE POLICY "juridico_docs_update" ON storage.objects
-  FOR UPDATE TO authenticated
-  USING (
-    bucket_id = 'documentos-juridicos' AND
-    EXISTS (SELECT 1 FROM public.usuarios u
-            WHERE u.auth_user_id = auth.uid() AND u.rol_id IN (1, 18, 26) AND u.activo = true)
-  )
-  WITH CHECK (
-    bucket_id = 'documentos-juridicos' AND
-    EXISTS (SELECT 1 FROM public.usuarios u
-            WHERE u.auth_user_id = auth.uid() AND u.rol_id IN (1, 18, 26) AND u.activo = true)
-  );
-
-DROP POLICY IF EXISTS "juridico_docs_delete" ON storage.objects;
-CREATE POLICY "juridico_docs_delete" ON storage.objects
-  FOR DELETE TO authenticated
-  USING (
-    bucket_id = 'documentos-juridicos' AND
-    EXISTS (SELECT 1 FROM public.usuarios u
-            WHERE u.auth_user_id = auth.uid() AND u.rol_id = 1 AND u.activo = true)
-  );
+  DROP POLICY IF EXISTS "juridico_docs_delete" ON storage.objects;
+  CREATE POLICY "juridico_docs_delete" ON storage.objects
+    FOR DELETE TO authenticated
+    USING (
+      bucket_id = 'documentos-juridicos' AND
+      EXISTS (SELECT 1 FROM public.usuarios u
+              WHERE u.auth_user_id = auth.uid() AND u.rol_id = 1 AND u.activo = true)
+    );
+EXCEPTION WHEN insufficient_privilege THEN
+  RAISE NOTICE 'Sin privilegio para crear políticas en storage.objects (el rol no es owner). Omitido — crear manualmente en el dashboard de Storage con las mismas condiciones. Detalle: %', SQLERRM;
+END $$;
