@@ -33,6 +33,14 @@
 --
 -- CREATE OR REPLACE => idempotente. Re-aplica revoke/grant. Bloque final self-verifying:
 --   aborta (RAISE EXCEPTION) si la def resultante no contiene las keys esperadas.
+--
+-- DRIFT dev<->prod (2026-07-22): showrooms_proyecto.horarios (text NULL) existe en prod
+--   pero falta en dev (fue añadida a prod fuera del flujo de migraciones). Como el cuerpo
+--   LANGUAGE sql se valida al crear la función, sin la columna el CREATE aborta en dev.
+--   El ALTER guardado abajo es no-op en prod (IF NOT EXISTS) y añade la columna en dev,
+--   dejando ambos idénticos antes de crear el RPC.
+
+ALTER TABLE public.showrooms_proyecto ADD COLUMN IF NOT EXISTS horarios text;
 
 CREATE OR REPLACE FUNCTION public.landing_daiku_rpc()
 RETURNS jsonb
