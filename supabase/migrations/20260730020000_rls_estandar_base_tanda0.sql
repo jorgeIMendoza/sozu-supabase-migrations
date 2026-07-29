@@ -44,6 +44,11 @@
 --   c) Sin BEGIN/COMMIT (supabase db push ya transacciona) y las policies se
 --      crean con DROP POLICY IF EXISTS delante, porque CREATE POLICY no es
 --      idempotente y rompería un re-run del CI.
+--   d) El REVOKE de los helpers va FROM PUBLIC, anon. Igual que en las tablas,
+--      pg_default_acl del esquema public otorga EXECUTE a anon en toda función
+--      nueva, y revocar a PUBLIC no toca ese grant directo al rol. Con el patrón
+--      del documento, current_puede_tabla y current_puede habrían quedado
+--      ejecutables por anon. service_role conserva su EXECUTE.
 --
 -- Nota sobre los UAT del documento: UAT-2 y UAT-3 hacen UPDATE de submenus
 -- dentro de BEGIN/ROLLBACK. No se ejecutaron: son escrituras contra prod y este
@@ -123,7 +128,7 @@ COMMENT ON FUNCTION public.current_puede_tabla(text, text) IS
   'ACTIVO (menú ACTIVO) declarado para <_tabla> en rls_tablas_submenus. '
   'STABLE y row-independent: se evalúa una vez por statement.';
 
-REVOKE ALL ON FUNCTION public.current_puede_tabla(text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.current_puede_tabla(text, text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.current_puede_tabla(text, text) TO authenticated;
 
 -- Regla completa para tablas sin noción de dueño.
@@ -142,7 +147,7 @@ COMMENT ON FUNCTION public.current_puede(text, text) IS
   'Regla base sin rama de dueño: permiso de menú activo O impersonar. '
   'Para tablas sin dueño identificable (catálogos operativos, tablas puente).';
 
-REVOKE ALL ON FUNCTION public.current_puede(text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.current_puede(text, text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.current_puede(text, text) TO authenticated;
 
 -- -----------------------------------------------------------------------------

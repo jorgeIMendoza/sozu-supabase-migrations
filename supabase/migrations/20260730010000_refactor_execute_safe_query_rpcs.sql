@@ -43,6 +43,14 @@
 --      propiedades.id_entidad_relacionada_dueno.
 --   c) Sin BEGIN/COMMIT: supabase db push ya envuelve cada migración en una
 --      transacción y anidarla cerraría la del CI antes de tiempo.
+--   d) El REVOKE va FROM PUBLIC, anon — no solo FROM PUBLIC. pg_default_acl del
+--      esquema public para funciones es 'anon=X | authenticated=X |
+--      service_role=X', así que toda función NUEVA nace con EXECUTE para anon, y
+--      revocar a PUBLIC no toca un grant hecho directamente al rol anon. Con el
+--      patrón del documento las 7 RPCs habrían quedado ejecutables por anon:
+--      lo detectó el bloque self-verifying en el deploy a dev (2026-07-30).
+--      No afectaba a sync_conyuge_compradores porque ya existía y
+--      CREATE OR REPLACE conserva la ACL. service_role conserva su EXECUTE.
 --
 -- RIESGO CONOCIDO, decisión de negocio pendiente (no se resuelve aquí):
 --   run_reporte ejecuta reportes.query_sql como postgres, y la escritura de
@@ -140,7 +148,7 @@ COMMENT ON FUNCTION public.get_valor_por_proyecto(integer[], bigint[]) IS
   'Gate: submenú /admin/cuentas-cobranza permiso leer, o puede_impersonar. '
   'Reemplaza execute_safe_query en src/pages/admin/Pagos.tsx.';
 
-REVOKE ALL ON FUNCTION public.get_valor_por_proyecto(integer[], bigint[]) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.get_valor_por_proyecto(integer[], bigint[]) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_valor_por_proyecto(integer[], bigint[]) TO authenticated;
 
 -- =============================================================================
@@ -233,7 +241,7 @@ $function$;
 COMMENT ON FUNCTION public.get_project_owner_breakdown(bigint[], integer) IS
   'Desglose por dueño de las cuentas de un proyecto. Gate: /admin/cuentas-cobranza leer o puede_impersonar.';
 
-REVOKE ALL ON FUNCTION public.get_project_owner_breakdown(bigint[], integer) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.get_project_owner_breakdown(bigint[], integer) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_project_owner_breakdown(bigint[], integer) TO authenticated;
 
 -- =============================================================================
@@ -300,7 +308,7 @@ COMMENT ON FUNCTION public.get_project_collection_totals(bigint[]) IS
   'Totales de acuerdos y aplicaciones por categoría (durante_obra/contraentrega/otro) '
   'para un set de cuentas. Gate: /admin/cuentas-cobranza leer o puede_impersonar.';
 
-REVOKE ALL ON FUNCTION public.get_project_collection_totals(bigint[]) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.get_project_collection_totals(bigint[]) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_project_collection_totals(bigint[]) TO authenticated;
 
 -- =============================================================================
@@ -406,7 +414,7 @@ COMMENT ON FUNCTION public.get_contratos_pendientes() IS
   'Gate: puede_impersonar, o permiso leer en /admin/legal/contratos (submenú hoy inactivo). '
   'Reemplaza execute_safe_query en legal/Contratos.tsx.';
 
-REVOKE ALL ON FUNCTION public.get_contratos_pendientes() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.get_contratos_pendientes() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_contratos_pendientes() TO authenticated;
 
 -- =============================================================================
@@ -556,7 +564,7 @@ COMMENT ON FUNCTION public.run_reporte(integer, jsonb, integer) IS
   '(roles 1 y 2), así que quien pueda editar un reporte decide qué SQL corre como postgres. '
   'Reemplaza execute_safe_query en ReporteViewer.tsx.';
 
-REVOKE ALL ON FUNCTION public.run_reporte(integer, jsonb, integer) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.run_reporte(integer, jsonb, integer) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.run_reporte(integer, jsonb, integer) TO authenticated;
 
 -- =============================================================================
@@ -652,7 +660,7 @@ COMMENT ON FUNCTION public.get_reporte_filtro_opciones(integer, text, jsonb) IS
   'Opciones de un filtro select/multiselect de un reporte. El SQL sale de '
   'reportes.filtros_configuracion[].query_opciones. Gate: user_can_access_report.';
 
-REVOKE ALL ON FUNCTION public.get_reporte_filtro_opciones(integer, text, jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.get_reporte_filtro_opciones(integer, text, jsonb) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_reporte_filtro_opciones(integer, text, jsonb) TO authenticated;
 
 -- =============================================================================
@@ -730,7 +738,7 @@ COMMENT ON FUNCTION public.validar_query_reporte(text) IS
   'actualizar en /admin/configuracion-reportes cuando ese submenú tenga permisos '
   'configurados (hoy no tiene ninguno). Solo valida con LIMIT 1. No otorgar a otros roles.';
 
-REVOKE ALL ON FUNCTION public.validar_query_reporte(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.validar_query_reporte(text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.validar_query_reporte(text) TO authenticated;
 
 -- =============================================================================
