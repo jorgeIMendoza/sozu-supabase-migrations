@@ -29,70 +29,50 @@
 -- migración debe fallar en el CI en lugar de arrastrarlo en silencio.
 -- Sin BEGIN/COMMIT (el CI envuelve en transacción).
 
--- 1) Vista dependiente de borrar_pagos_bottura
+-- DROP dinámico: cubre TODAS las public.borrar_* (incluye leftovers que no estaban en la
+-- lista fija verificada contra prod, p.ej. en dev: borrar_auditoria_pagos,
+-- borrar_pagos_bottura_copia, borrar_pagos_bottura_corregido). Sin CASCADE (si algo externo
+-- no previsto dependiera de estas tablas, el DROP falla en CI en vez de arrastrarlo).
+
+-- 1) Vistas primero (dependen de tablas borrar_*).
+--    v_pagos_efectivo (no lleva prefijo borrar_) depende de borrar_pagos_bottura.
 DROP VIEW IF EXISTS public.v_pagos_efectivo;
+DO $$
+DECLARE v_list text;
+BEGIN
+  SELECT string_agg(format('public.%I', c.relname), ', ') INTO v_list
+  FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+  WHERE n.nspname = 'public' AND c.relname LIKE 'borrar\_%' AND c.relkind = 'v';
+  IF v_list IS NOT NULL THEN EXECUTE 'DROP VIEW IF EXISTS ' || v_list; END IF;
 
--- 2) Cargadores de staging
-DROP FUNCTION IF EXISTS public.borrar_sp_cargar_amenidades_proyectos_desde_stagin();
-DROP FUNCTION IF EXISTS public.borrar_sp_cargar_edificio_modelo();
-DROP FUNCTION IF EXISTS public.borrar_sp_cargar_edificios_desde_stagin();
-DROP FUNCTION IF EXISTS public.borrar_sp_cargar_modelos_caracteristicas_desde_stagin();
-DROP FUNCTION IF EXISTS public.borrar_sp_cargar_modelos_desde_stagin();
-DROP FUNCTION IF EXISTS public.borrar_sp_cargar_multimedias_modelo_desde_stagin();
-DROP FUNCTION IF EXISTS public.borrar_sp_cargar_multimedias_proyecto();
-DROP FUNCTION IF EXISTS public.borrar_sp_cargar_proyectos_desde_stagin();
-DROP FUNCTION IF EXISTS public.borrar_sp_cargar_videos_youtube_proyecto();
-DROP FUNCTION IF EXISTS public.borrar_sp_esquemas_pago_proyecto();
-DROP FUNCTION IF EXISTS public.borrar_sp_vistas();
+  SELECT string_agg(format('public.%I', c.relname), ', ') INTO v_list
+  FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+  WHERE n.nspname = 'public' AND c.relname LIKE 'borrar\_%' AND c.relkind = 'm';
+  IF v_list IS NOT NULL THEN EXECUTE 'DROP MATERIALIZED VIEW IF EXISTS ' || v_list; END IF;
+END $$;
 
--- 3) Tablas de staging legacy
-DROP TABLE IF EXISTS
-  public.borrar_acuerdos_pago_manto_stagin,
-  public.borrar_acuerdos_pago_productos_stagin,
-  public.borrar_acuerdos_pago_stagin,
-  public.borrar_amenidades_proyectos_stagin,
-  public.borrar_aplicacion_pagos_migracion,
-  public.borrar_audit_errores,
-  public.borrar_audit_pagos,
-  public.borrar_audit_splits,
-  public.borrar_bancos_banxico,
-  public.borrar_bodegas_estacionamientos_daiku_stagin,
-  public.borrar_bodegas_stagin,
-  public.borrar_brochures_proyecto_stagin,
-  public.borrar_cuentas_bancarias_stagin,
-  public.borrar_cuentas_cobranza_mantenimientos_stagin,
-  public.borrar_cuentas_cobranza_productos_stagin,
-  public.borrar_cuentas_cobranza_stagin,
-  public.borrar_documentos_stagin,
-  public.borrar_duenos_desarrolladoras_proyecto_stagin,
-  public.borrar_edificios_stagin,
-  public.borrar_esquemas_pago_stagin,
-  public.borrar_estacionamientos_stagin,
-  public.borrar_historico_completo,
-  public.borrar_leads_hs_manuel_stagin,
-  public.borrar_modelos_caracteristicas_stagin,
-  public.borrar_modelos_stagin,
-  public.borrar_multimedias_modelo_stagin,
-  public.borrar_multimedias_todo_stagin,
-  public.borrar_ofertas_esquemas_pago_productos_stagin,
-  public.borrar_ofertas_stagin,
-  public.borrar_pagos_bottura,
-  public.borrar_pagos_duplicate2,
-  public.borrar_pagos_error,
-  public.borrar_pagos_error_cc,
-  public.borrar_pagos_revision_evidencias,
-  public.borrar_pagos_stagin,
-  public.borrar_pagos_stp_cuentas_437_y_445,
-  public.borrar_pagos_stp_raw_duplicate,
-  public.borrar_personas_stagin,
-  public.borrar_propiedades_cuenta_stp_stagin,
-  public.borrar_propiedades_imagenes_360_stagin,
-  public.borrar_propiedades_imagenes_stagin,
-  public.borrar_propiedades_stagin,
-  public.borrar_proyectos_stagin,
-  public.borrar_stp_propiedades,
-  public.borrar_videos_youtube_stagin,
-  public.borrar_vistas_stagin;
+-- 2) Funciones/cargadores borrar_*
+DO $$
+DECLARE r record;
+BEGIN
+  FOR r IN
+    SELECT p.oid::regprocedure AS sig
+    FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public' AND p.proname LIKE 'borrar\_%'
+  LOOP
+    EXECUTE 'DROP FUNCTION IF EXISTS ' || r.sig;
+  END LOOP;
+END $$;
+
+-- 3) Tablas de staging legacy — todas en UNA sentencia (resuelve FKs internas del conjunto).
+DO $$
+DECLARE v_list text;
+BEGIN
+  SELECT string_agg(format('public.%I', c.relname), ', ') INTO v_list
+  FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+  WHERE n.nspname = 'public' AND c.relname LIKE 'borrar\_%' AND c.relkind IN ('r', 'p');
+  IF v_list IS NOT NULL THEN EXECUTE 'DROP TABLE IF EXISTS ' || v_list; END IF;
+END $$;
 
 -- Verificación: no debe quedar ningún objeto `borrar_*` en public.
 DO $$
