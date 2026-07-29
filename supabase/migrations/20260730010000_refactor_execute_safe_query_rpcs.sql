@@ -43,6 +43,14 @@
 --      propiedades.id_entidad_relacionada_dueno.
 --   c) Sin BEGIN/COMMIT: supabase db push ya envuelve cada migración en una
 --      transacción y anidarla cerraría la del CI antes de tiempo.
+--   d) El REVOKE va FROM PUBLIC, anon — no solo FROM PUBLIC. pg_default_acl del
+--      esquema public para funciones es 'anon=X | authenticated=X |
+--      service_role=X', así que toda función NUEVA nace con EXECUTE para anon, y
+--      revocar a PUBLIC no toca un grant hecho directamente al rol anon. Con el
+--      patrón del documento las 7 RPCs habrían quedado ejecutables por anon:
+--      lo detectó el bloque self-verifying en el deploy a dev (2026-07-30).
+--      No afectaba a sync_conyuge_compradores porque ya existía y
+--      CREATE OR REPLACE conserva la ACL. service_role conserva su EXECUTE.
 --
 -- RIESGO CONOCIDO, decisión de negocio pendiente (no se resuelve aquí):
 --   run_reporte ejecuta reportes.query_sql como postgres, y la escritura de
@@ -67,11 +75,15 @@ BEGIN
     RAISE EXCEPTION 'Faltan helpers de autorización (user_has_permission / current_puede_impersonar / user_can_access_report)';
   END IF;
 
+  -- WARNING y no EXCEPTION: es expectativa del entorno, no invariante. En prod el
+  -- submenú 38 está activo; si en dev no existe o está inactivo, las RPC 1-3
+  -- quedan solo para puede_impersonar, que es degradación aceptable y no razón
+  -- para tumbar el deploy.
   IF NOT EXISTS (
     SELECT 1 FROM public.submenus
     WHERE vista_front_end = '/admin/cuentas-cobranza' AND activo = true
   ) THEN
-    RAISE EXCEPTION 'El submenú /admin/cuentas-cobranza no está activo: las RPC 1-3 quedarían cerradas para todos';
+    RAISE WARNING 'El submenú /admin/cuentas-cobranza no está activo en este entorno: las RPC 1-3 solo responderán a puede_impersonar';
   END IF;
 END
 $$;
@@ -140,7 +152,7 @@ COMMENT ON FUNCTION public.get_valor_por_proyecto(integer[], bigint[]) IS
   'Gate: submenú /admin/cuentas-cobranza permiso leer, o puede_impersonar. '
   'Reemplaza execute_safe_query en src/pages/admin/Pagos.tsx.';
 
-REVOKE ALL ON FUNCTION public.get_valor_por_proyecto(integer[], bigint[]) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.get_valor_por_proyecto(integer[], bigint[]) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_valor_por_proyecto(integer[], bigint[]) TO authenticated;
 
 -- =============================================================================
@@ -233,7 +245,7 @@ $function$;
 COMMENT ON FUNCTION public.get_project_owner_breakdown(bigint[], integer) IS
   'Desglose por dueño de las cuentas de un proyecto. Gate: /admin/cuentas-cobranza leer o puede_impersonar.';
 
-REVOKE ALL ON FUNCTION public.get_project_owner_breakdown(bigint[], integer) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.get_project_owner_breakdown(bigint[], integer) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_project_owner_breakdown(bigint[], integer) TO authenticated;
 
 -- =============================================================================
@@ -300,7 +312,7 @@ COMMENT ON FUNCTION public.get_project_collection_totals(bigint[]) IS
   'Totales de acuerdos y aplicaciones por categoría (durante_obra/contraentrega/otro) '
   'para un set de cuentas. Gate: /admin/cuentas-cobranza leer o puede_impersonar.';
 
-REVOKE ALL ON FUNCTION public.get_project_collection_totals(bigint[]) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.get_project_collection_totals(bigint[]) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_project_collection_totals(bigint[]) TO authenticated;
 
 -- =============================================================================
@@ -406,7 +418,7 @@ COMMENT ON FUNCTION public.get_contratos_pendientes() IS
   'Gate: puede_impersonar, o permiso leer en /admin/legal/contratos (submenú hoy inactivo). '
   'Reemplaza execute_safe_query en legal/Contratos.tsx.';
 
-REVOKE ALL ON FUNCTION public.get_contratos_pendientes() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.get_contratos_pendientes() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_contratos_pendientes() TO authenticated;
 
 -- =============================================================================
@@ -556,7 +568,7 @@ COMMENT ON FUNCTION public.run_reporte(integer, jsonb, integer) IS
   '(roles 1 y 2), así que quien pueda editar un reporte decide qué SQL corre como postgres. '
   'Reemplaza execute_safe_query en ReporteViewer.tsx.';
 
-REVOKE ALL ON FUNCTION public.run_reporte(integer, jsonb, integer) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.run_reporte(integer, jsonb, integer) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.run_reporte(integer, jsonb, integer) TO authenticated;
 
 -- =============================================================================
@@ -652,7 +664,7 @@ COMMENT ON FUNCTION public.get_reporte_filtro_opciones(integer, text, jsonb) IS
   'Opciones de un filtro select/multiselect de un reporte. El SQL sale de '
   'reportes.filtros_configuracion[].query_opciones. Gate: user_can_access_report.';
 
-REVOKE ALL ON FUNCTION public.get_reporte_filtro_opciones(integer, text, jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.get_reporte_filtro_opciones(integer, text, jsonb) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_reporte_filtro_opciones(integer, text, jsonb) TO authenticated;
 
 -- =============================================================================
@@ -730,7 +742,7 @@ COMMENT ON FUNCTION public.validar_query_reporte(text) IS
   'actualizar en /admin/configuracion-reportes cuando ese submenú tenga permisos '
   'configurados (hoy no tiene ninguno). Solo valida con LIMIT 1. No otorgar a otros roles.';
 
-REVOKE ALL ON FUNCTION public.validar_query_reporte(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.validar_query_reporte(text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.validar_query_reporte(text) TO authenticated;
 
 -- =============================================================================
@@ -787,9 +799,12 @@ BEGIN
     RAISE EXCEPTION 'Se esperaban 7 funciones (una firma cada una), hay %', v_n;
   END IF;
 
-  -- El motivo de todo el refactor: execute_safe_query NO se abre.
-  IF has_function_privilege('authenticated', 'public.execute_safe_query(text, integer)', 'EXECUTE')
-     OR has_function_privilege('anon', 'public.execute_safe_query(text, integer)', 'EXECUTE') THEN
+  -- El motivo de todo el refactor: execute_safe_query NO se abre. El
+  -- to_regprocedure evita que la aserción truene con undefined_function si el
+  -- entorno no tiene esa función.
+  IF to_regprocedure('public.execute_safe_query(text, integer)') IS NOT NULL
+     AND (has_function_privilege('authenticated', 'public.execute_safe_query(text, integer)', 'EXECUTE')
+          OR has_function_privilege('anon', 'public.execute_safe_query(text, integer)', 'EXECUTE')) THEN
     RAISE EXCEPTION 'execute_safe_query quedó abierta a anon/authenticated';
   END IF;
 
@@ -801,8 +816,13 @@ BEGIN
   WHERE s.vista_front_end = '/admin/cuentas-cobranza'
     AND s.activo = true
     AND perm.nombre = 'leer';
+  -- WARNING por lo mismo que la pre-condición: los catálogos de dev y prod
+  -- difieren (en prod son 10 roles) y quedarse solo con puede_impersonar no
+  -- justifica tumbar el deploy.
   IF v_n = 0 THEN
-    RAISE EXCEPTION 'Ningún rol tiene leer en /admin/cuentas-cobranza: las RPC 1-3 quedarían cerradas para todos';
+    RAISE WARNING 'Ningún rol tiene leer en /admin/cuentas-cobranza en este entorno: las RPC 1-3 solo responderán a puede_impersonar';
+  ELSIF v_n < 10 THEN
+    RAISE NOTICE 'Roles con leer en /admin/cuentas-cobranza: % (en prod son 10)', v_n;
   END IF;
 
   -- RPC 7 exige rol_id = 1: si el rol no existe, la función nace muerta.
