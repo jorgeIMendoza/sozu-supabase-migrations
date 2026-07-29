@@ -54,7 +54,27 @@ INSERT INTO _rpc_publicas (proname, consumo) VALUES
   ('update_lead_datos',          'pages/public/ApartarDirectoCapturePage'),
   ('get_cliente_estado_oferta',  'pages/public/ApartarDirectoCapturePage'),
   ('guardar_csf_oferta',         'pages/public/ApartarDirectoCapturePage'),
-  ('check_email_blocked_role',   'pages/auth/Login, pre-login');
+  ('check_email_blocked_role',   'pages/auth/Login, pre-login'),
+  -- Helpers de autorización invocados por policies TO public/anon. Anon los EVALÚA al leer
+  -- tablas del sitio público (p.ej. oferta digital lee entidades_relacionadas); si se revoca
+  -- su EXECUTE, anon truena con "permission denied for function" y cae el flujo público.
+  -- Son predicados de authz, no vuelcan datos (a diferencia de los get_*_export que sí se revocan).
+  ('is_admin_user',              'policy TO public: entidades_relacionadas/usuarios/avisos'),
+  ('is_super_admin',             'policy TO public: usuarios/avisos/aviso_triggers (2 sobrecargas)'),
+  ('can_view_all_prospects',     'policy TO public: entidades_relacionadas.select'),
+  ('can_access_agent_owned_lead','policy TO public: entidades_relacionadas.select'),
+  ('user_has_role',              'helper authz (familia user_has_*)'),
+  ('user_has_permission',        'helper authz (familia user_has_*)'),
+  ('user_has_internal_role',     'helper authz (familia user_has_*)'),
+  ('current_es_super_admin',     'helper authz usado por RLS'),
+  ('current_puede_impersonar',   'helper authz usado por RLS'),
+  ('current_persona_id',         'helper authz usado por RLS (anon en oferta pública)'),
+  ('current_socio_bancario_id',  'helper RLS socio bancario (policies passthrough a anon)'),
+  ('socio_desarrollos_activos',  'helper RLS socio bancario'),
+  ('socio_tiene_proyecto',       'helper RLS socio bancario'),
+  ('socio_tiene_edificio',       'helper RLS socio bancario'),
+  ('socio_tiene_propiedad',      'helper RLS socio bancario'),
+  ('socio_tiene_cuenta',         'helper RLS socio bancario');
 
 -- ════════════════════════════════════════════════════════════════════════════════════
 -- Guarda: ninguna RPC con `p_token` puede quedar fuera de la lista de flujos públicos.
