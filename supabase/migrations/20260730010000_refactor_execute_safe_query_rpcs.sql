@@ -75,11 +75,15 @@ BEGIN
     RAISE EXCEPTION 'Faltan helpers de autorización (user_has_permission / current_puede_impersonar / user_can_access_report)';
   END IF;
 
+  -- WARNING y no EXCEPTION: es expectativa del entorno, no invariante. En prod el
+  -- submenú 38 está activo; si en dev no existe o está inactivo, las RPC 1-3
+  -- quedan solo para puede_impersonar, que es degradación aceptable y no razón
+  -- para tumbar el deploy.
   IF NOT EXISTS (
     SELECT 1 FROM public.submenus
     WHERE vista_front_end = '/admin/cuentas-cobranza' AND activo = true
   ) THEN
-    RAISE EXCEPTION 'El submenú /admin/cuentas-cobranza no está activo: las RPC 1-3 quedarían cerradas para todos';
+    RAISE WARNING 'El submenú /admin/cuentas-cobranza no está activo en este entorno: las RPC 1-3 solo responderán a puede_impersonar';
   END IF;
 END
 $$;
@@ -795,9 +799,12 @@ BEGIN
     RAISE EXCEPTION 'Se esperaban 7 funciones (una firma cada una), hay %', v_n;
   END IF;
 
-  -- El motivo de todo el refactor: execute_safe_query NO se abre.
-  IF has_function_privilege('authenticated', 'public.execute_safe_query(text, integer)', 'EXECUTE')
-     OR has_function_privilege('anon', 'public.execute_safe_query(text, integer)', 'EXECUTE') THEN
+  -- El motivo de todo el refactor: execute_safe_query NO se abre. El
+  -- to_regprocedure evita que la aserción truene con undefined_function si el
+  -- entorno no tiene esa función.
+  IF to_regprocedure('public.execute_safe_query(text, integer)') IS NOT NULL
+     AND (has_function_privilege('authenticated', 'public.execute_safe_query(text, integer)', 'EXECUTE')
+          OR has_function_privilege('anon', 'public.execute_safe_query(text, integer)', 'EXECUTE')) THEN
     RAISE EXCEPTION 'execute_safe_query quedó abierta a anon/authenticated';
   END IF;
 
@@ -809,8 +816,13 @@ BEGIN
   WHERE s.vista_front_end = '/admin/cuentas-cobranza'
     AND s.activo = true
     AND perm.nombre = 'leer';
+  -- WARNING por lo mismo que la pre-condición: los catálogos de dev y prod
+  -- difieren (en prod son 10 roles) y quedarse solo con puede_impersonar no
+  -- justifica tumbar el deploy.
   IF v_n = 0 THEN
-    RAISE EXCEPTION 'Ningún rol tiene leer en /admin/cuentas-cobranza: las RPC 1-3 quedarían cerradas para todos';
+    RAISE WARNING 'Ningún rol tiene leer en /admin/cuentas-cobranza en este entorno: las RPC 1-3 solo responderán a puede_impersonar';
+  ELSIF v_n < 10 THEN
+    RAISE NOTICE 'Roles con leer en /admin/cuentas-cobranza: % (en prod son 10)', v_n;
   END IF;
 
   -- RPC 7 exige rol_id = 1: si el rol no existe, la función nace muerta.
