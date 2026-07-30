@@ -1,6 +1,10 @@
 -- Portal Bancos — branding por banco: columnas logo_url e icono_url en bancos_convenio
 -- Fecha: 2026-07-30
 --
+-- NOTA: re-timestamp de 20260730050000 → 20260730140000. El timestamp original colisionó en
+-- schema_migrations con otra migración (20260730050000_auditoria_secdef_sin_guarda_authz.sql)
+-- ya aplicada a dev (SQLSTATE 23505 en el deploy del PR #491). Este archivo reemplaza al viejo.
+--
 -- La pantalla «Bancos» del Portal Bancos ya intenta guardar el branding del banco: sube el
 -- archivo al bucket `documentos` y luego hace UPDATE bancos_convenio SET logo_url/icono_url,
 -- que falla porque las columnas NO existen (imagen queda huérfana, botón sigue en «Subir»).
