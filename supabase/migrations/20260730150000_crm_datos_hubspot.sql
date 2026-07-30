@@ -1,7 +1,7 @@
 -- Migración de DATOS HubSpot → CRM (generada desde los CSV; misma lógica validada en dev).
 -- Contactos: 2938 | Negocios: 1846. Idempotente (dedup por hubspot_id + correo/tel).
 -- Requiere columnas hubspot_id (migración 20260730130000). Dueños por email; etapas por nombre normalizado.
-BEGIN;
+-- SIN BEGIN/COMMIT explícito: supabase db push envuelve cada migración en su propia tx (atómico: datos + registro juntos).
 -- normalizador de etapas (acentos/mayúsculas/artículos) — igual que el alias del front
 CREATE OR REPLACE FUNCTION pg_temp.normet(t text) RETURNS text AS $NE$ SELECT btrim(regexp_replace(regexp_replace(lower(translate(coalesce(t,''),'áéíóúüñ','aeiouun')), '\m(el|la|los|las)\M','','g'), '\s+',' ','g')) $NE$ LANGUAGE sql IMMUTABLE;
 
@@ -4916,4 +4916,4 @@ WHERE NOT EXISTS (SELECT 1 FROM public.crm_negocios n WHERE n.hubspot_id = s.hub
           (SELECT la.id_entidad_relacionada FROM public.crm_leads_atribucion la WHERE la.hubspot_id = s.contact_hub LIMIT 1)
   );
 
-COMMIT;
+-- fin (commit implícito por supabase db push al cerrar su transacción envolvente)
