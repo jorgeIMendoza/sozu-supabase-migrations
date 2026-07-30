@@ -173,6 +173,7 @@ DECLARE
   n_rls      int := 0;
   n_pol      int := 0;
   n_ausente  int := 0;
+  n_ajenas   int := 0;
 BEGIN
   FOR r IN SELECT p.tabla, p.clase FROM _rls_plan p ORDER BY p.clase, p.tabla LOOP
 
@@ -182,6 +183,26 @@ BEGIN
     ) THEN
       n_ausente := n_ausente + 1;
       RAISE NOTICE 'drift: no existe public.% — se omite', r.tabla;
+      CONTINUE;
+    END IF;
+
+    -- ENABLE ROW LEVEL SECURITY y CREATE POLICY exigen ser dueño de la tabla. El CI entra
+    -- como postgres, pero puede haber tablas de otro dueño (drift entre entornos): en dev
+    -- _bak_personas_ocupacion_20260722 pertenece a otro rol y abortaba la migración con
+    -- "must be owner of table" (42501). En prod las 97 son de postgres, verificado.
+    -- Se omiten con aviso en lugar de tumbar el deploy; quedan reportadas al final.
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public' AND c.relname = r.tabla
+        AND pg_has_role(current_user, c.relowner, 'USAGE')
+    ) THEN
+      n_ajenas := n_ajenas + 1;
+      RAISE NOTICE 'omitida public.%: dueño % no alcanzable desde current_user %',
+        r.tabla,
+        (SELECT pg_get_userbyid(c.relowner) FROM pg_class c
+         JOIN pg_namespace n ON n.oid = c.relnamespace
+         WHERE n.nspname='public' AND c.relname = r.tabla),
+        current_user;
       CONTINUE;
     END IF;
 
@@ -225,8 +246,8 @@ BEGIN
 
   END LOOP;
 
-  RAISE NOTICE 'RLS activado en % tablas, % políticas creadas, % ausentes por drift',
-    n_rls, n_pol, n_ausente;
+  RAISE NOTICE 'RLS activado en % tablas, % políticas creadas, % ausentes por drift, % omitidas por dueño ajeno',
+    n_rls, n_pol, n_ausente, n_ajenas;
 END $$;
 
 -- ════════════════════════════════════════════════════════════════════════════════════
@@ -236,16 +257,33 @@ DO $$
 DECLARE
   v_sin_rls    text;
   v_sin_policy text;
+  v_ajenas     text;
 BEGIN
-  -- 1. Ninguna tabla del plan puede quedar sin RLS.
+  -- 1. Ninguna tabla del plan que SÍ podíamos modificar puede quedar sin RLS.
+  --    Las de dueño ajeno no las puede tocar esta migración: se avisan aparte y no
+  --    bloquean, igual que en 20260729204501 con las funciones de supabase_admin.
   SELECT string_agg(p.tabla, ', ' ORDER BY p.tabla) INTO v_sin_rls
   FROM _rls_plan p
   JOIN pg_class c ON c.relname = p.tabla
   JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = 'public'
-  WHERE c.relkind IN ('r','p') AND NOT c.relrowsecurity;
+  WHERE c.relkind IN ('r','p') AND NOT c.relrowsecurity
+    AND pg_has_role(current_user, c.relowner, 'USAGE');
 
   IF v_sin_rls IS NOT NULL THEN
-    RAISE EXCEPTION 'Tablas del plan que siguen sin RLS: %', v_sin_rls;
+    RAISE EXCEPTION 'Tablas del plan que siguen sin RLS y sí podíamos modificar: %', v_sin_rls;
+  END IF;
+
+  SELECT string_agg(format('%s (dueño %s)', p.tabla, pg_get_userbyid(c.relowner)),
+                    ', ' ORDER BY p.tabla) INTO v_ajenas
+  FROM _rls_plan p
+  JOIN pg_class c ON c.relname = p.tabla
+  JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = 'public'
+  WHERE c.relkind IN ('r','p') AND NOT c.relrowsecurity
+    AND NOT pg_has_role(current_user, c.relowner, 'USAGE');
+
+  IF v_ajenas IS NOT NULL THEN
+    RAISE WARNING 'Tablas que siguen SIN RLS y expuestas a anon porque su dueño no es alcanzable desde %. Requieren ALTER TABLE ... OWNER TO postgres, o ejecutar el ENABLE como su dueño: %',
+      current_user, v_ajenas;
   END IF;
 
   -- 2. RLS encendido sin ninguna política deniega todo: sería romper la app.
@@ -254,6 +292,7 @@ BEGIN
   JOIN pg_class c ON c.relname = p.tabla
   JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = 'public'
   WHERE c.relkind IN ('r','p')
+    AND c.relrowsecurity
     AND NOT EXISTS (SELECT 1 FROM pg_policy pol WHERE pol.polrelid = c.oid);
 
   IF v_sin_policy IS NOT NULL THEN
