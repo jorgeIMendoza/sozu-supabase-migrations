@@ -5,11 +5,20 @@
 #
 # Colocar este archivo como `.github/workflows/notify-pr-dev.yml` en CADA repo
 # monitoreado:
+#   - jorgeIMendoza/sozu-cliente-app
 #   - jorgeIMendoza/sozu-admin
 #   - jorgeIMendoza/sozu-supabase-migrations
 #   - jorgeIMendoza/sozu-edge-functions
 #   - jorgeIMendoza/sozu-n8n-workflows
 #   - sozu-com/server-stp
+#
+# El aviso al admin y el aviso a los autores van en JOBS SEPARADOS, y ninguno
+# usa actions del marketplace: el 2026-08-06 un "Service Unavailable" al
+# resolver `google-github-actions/auth` tumbó el job entero en la fase de setup
+# (antes de cualquier step, así que `continue-on-error` no sirvió de nada) y el
+# merge a dev de un PR no notificó a nadie. Ahora el token de Google se pide
+# firmando un JWT con openssl — solo curl, jq y openssl, ya presentes en el
+# runner — y un fallo al resolver teléfonos no puede impedir el aviso al admin.
 
 name: Notificar PR (WhatsApp)
 
@@ -18,17 +27,20 @@ on:
     types: [opened, reopened, ready_for_review, closed]
     branches: [dev, main]
 
+env:
+  N8N_WEBHOOK: https://automatizacion-n8n.fbqqbe.easypanel.host/webhook/manda_notificacion
+  N8N_APIKEY: 80FA62E3FD0C-4477-8B31-8A2CD6AF7B57
+  ADMIN: "+5217221514185"
+
 jobs:
   notify-abierto:
     # Solo PRs abiertos hacia dev (igual que antes)
     if: github.event.action != 'closed' && github.event.pull_request.base.ref == 'dev'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Enviar WhatsApp (admin)
         env:
-          N8N_WEBHOOK: https://automatizacion-n8n.fbqqbe.easypanel.host/webhook/manda_notificacion
-          N8N_APIKEY: 80FA62E3FD0C-4477-8B31-8A2CD6AF7B57
-          DESTINO: "+5217221514185"
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUM: ${{ github.event.number }}
           REPO_FULL: ${{ github.repository }}
@@ -44,34 +56,67 @@ jobs:
           AUTORES="$(printf '%s' "$PR_BODY" \
             | grep -oP '(?<=<!-- pr_author: )[\w.-]+(?= -->)' 2>/dev/null | sort -u | paste -sd ', ' || true)"
           AUTOR="${AUTORES:-$ACTOR}"
-          curl -s -X POST "$N8N_WEBHOOK" \
-            -H "apikey: $N8N_APIKEY" \
-            -H "Content-Type: application/json" \
-            -d "{\"tipo\":\"wa\",\"telefono\":\"${DESTINO}\",\"mensajeWA\":\"Hay un PR para DEV del repo: ${REPO_NAME}, cambios de: ${AUTOR}\",\"instanciaWA\":\"Pruebas de todo\"}"
+          MSG="Hay un PR para DEV del repo: ${REPO_NAME}, cambios de: ${AUTOR}"
+          PAYLOAD="$(jq -n --arg tel "$ADMIN" --arg msg "$MSG" \
+            '{tipo:"wa",telefono:$tel,mensajeWA:$msg,instanciaWA:"Pruebas de todo"}')"
+          # Reintentos: si n8n no responde a la primera, el aviso se pierde sin
+          # dejar rastro. Tres intentos y el job falla si ninguno entra.
+          for intento in 1 2 3; do
+            CODE="$(curl -s -o /tmp/n8n.out -w '%{http_code}' --max-time 20 \
+              -X POST "$N8N_WEBHOOK" -H "apikey: $N8N_APIKEY" \
+              -H "Content-Type: application/json" -d "$PAYLOAD" || echo 000)"
+            case "$CODE" in 2*) echo "Notificado admin"; exit 0 ;; esac
+            echo "Intento ${intento} falló (HTTP ${CODE}): $(cat /tmp/n8n.out)"
+            sleep $((intento * 5))
+          done
+          echo "::error::No se pudo notificar al admin tras 3 intentos"
+          exit 1
 
-  notify-cerrado:
-    # PR cerrado (mergeado o no) hacia dev o main -> avisa al autor + admin
+  notify-cerrado-admin:
+    # PR cerrado (mergeado o no) hacia dev o main -> avisa al admin.
+    # Job aparte y sin dependencias: es el aviso que nunca debe perderse.
     if: github.event.action == 'closed'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - name: Autenticar a Google Cloud (Firestore)
-        continue-on-error: true
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.FIREBASE_GCP_DEV }}
-
-      - name: Configurar gcloud
-        continue-on-error: true
-        uses: google-github-actions/setup-gcloud@v2
-
-      - name: Enviar WhatsApp (autor y admin)
+      - name: Enviar WhatsApp (admin)
         env:
-          N8N_WEBHOOK: https://automatizacion-n8n.fbqqbe.easypanel.host/webhook/manda_notificacion
-          N8N_APIKEY: 80FA62E3FD0C-4477-8B31-8A2CD6AF7B57
-          ADMIN: "+5217221514185"
+          PR_NUM: ${{ github.event.number }}
+          MERGED: ${{ github.event.pull_request.merged }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+          REPO: ${{ github.event.repository.name }}
+          CERRADO_POR: ${{ github.actor }}
+        run: |
+          if [ "$MERGED" = "true" ]; then
+            MSG="El PR #${PR_NUM} del repo ${REPO} fue MERGEADO a ${BASE} por ${CERRADO_POR}"
+          else
+            MSG="El PR #${PR_NUM} del repo ${REPO} (hacia ${BASE}) fue CERRADO sin merge por ${CERRADO_POR}"
+          fi
+          PAYLOAD="$(jq -n --arg tel "$ADMIN" --arg msg "$MSG" \
+            '{tipo:"wa",telefono:$tel,mensajeWA:$msg,instanciaWA:"Pruebas de todo"}')"
+          for intento in 1 2 3; do
+            CODE="$(curl -s -o /tmp/n8n.out -w '%{http_code}' --max-time 20 \
+              -X POST "$N8N_WEBHOOK" -H "apikey: $N8N_APIKEY" \
+              -H "Content-Type: application/json" -d "$PAYLOAD" || echo 000)"
+            case "$CODE" in 2*) echo "Notificado admin"; exit 0 ;; esac
+            echo "Intento ${intento} falló (HTTP ${CODE}): $(cat /tmp/n8n.out)"
+            sleep $((intento * 5))
+          done
+          echo "::error::No se pudo notificar al admin tras 3 intentos"
+          exit 1
+
+  notify-cerrado-autores:
+    # PR cerrado -> avisa a CADA autor real del PR, con su teléfono de Firestore.
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Enviar WhatsApp (autores del PR)
+        env:
+          SA_JSON: ${{ secrets.FIREBASE_GCP_DEV }}
           FIRESTORE_PROJECT: sozu-admin-dev
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ACTOR_LOGIN: ${{ github.event.pull_request.user.login }}
+          AUTOR_PR: ${{ github.event.pull_request.user.login }}
           PR_NUM: ${{ github.event.number }}
           MERGED: ${{ github.event.pull_request.merged }}
           BASE: ${{ github.event.pull_request.base.ref }}
@@ -87,7 +132,7 @@ jobs:
             | jq -r '.body // ""')"
           AUTORES="$(printf '%s' "$PR_BODY" \
             | grep -oP '(?<=<!-- pr_author: )[\w.-]+(?= -->)' 2>/dev/null | sort -u || true)"
-          if [ -z "$AUTORES" ]; then AUTORES="$ACTOR_LOGIN"; fi
+          if [ -z "$AUTORES" ]; then AUTORES="$AUTOR_PR"; fi
           echo "Autores a notificar: $(echo "$AUTORES" | paste -sd ', ')"
 
           if [ "$MERGED" = "true" ]; then
@@ -95,28 +140,69 @@ jobs:
           else
             MSG="Tu PR #${PR_NUM} del repo ${REPO} (hacia ${BASE}) fue CERRADO sin merge por ${CERRADO_POR}"
           fi
+
+          # Access token de Google firmando un JWT con la llave del service
+          # account. Antes esto lo hacían google-github-actions/auth +
+          # setup-gcloud; se quitaron porque su resolución en el setup del job
+          # es un punto de fallo que se lleva por delante todo el workflow.
+          b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
+          CLIENT_EMAIL="$(printf '%s' "$SA_JSON" | jq -r '.client_email // empty')"
+          PRIVATE_KEY="$(printf '%s' "$SA_JSON" | jq -r '.private_key // empty')"
+          ACCESS_TOKEN=""
+          if [ -n "$CLIENT_EMAIL" ] && [ -n "$PRIVATE_KEY" ]; then
+            IAT="$(date +%s)"; EXP="$((IAT + 3600))"
+            HEADER="$(printf '{"alg":"RS256","typ":"JWT"}' | b64url)"
+            CLAIM="$(jq -nc --arg iss "$CLIENT_EMAIL" --argjson iat "$IAT" --argjson exp "$EXP" \
+              '{iss:$iss,scope:"https://www.googleapis.com/auth/datastore",aud:"https://oauth2.googleapis.com/token",iat:$iat,exp:$exp}' \
+              | b64url)"
+            # La llave va a un archivo con permisos 600 (no a un process
+            # substitution: openssl no siempre puede abrir /dev/fd).
+            KEYFILE="$(mktemp)"; chmod 600 "$KEYFILE"
+            printf '%s' "$PRIVATE_KEY" > "$KEYFILE"
+            SIG="$(printf '%s.%s' "$HEADER" "$CLAIM" \
+              | openssl dgst -sha256 -sign "$KEYFILE" -binary | b64url)"
+            rm -f "$KEYFILE"
+            ACCESS_TOKEN="$(curl -s --max-time 20 -X POST https://oauth2.googleapis.com/token \
+              -d grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer \
+              --data-urlencode "assertion=${HEADER}.${CLAIM}.${SIG}" \
+              | jq -r '.access_token // empty')"
+          fi
+          if [ -z "$ACCESS_TOKEN" ]; then
+            echo "::warning::Sin token de Google: no se pueden leer los teléfonos de Firestore"
+          fi
+
           send() {
-            PAYLOAD=$(jq -n --arg tel "$1" --arg msg "$MSG" \
-              '{tipo:"wa",telefono:$tel,mensajeWA:$msg,instanciaWA:"Pruebas de todo"}')
-            curl -s -X POST "$N8N_WEBHOOK" \
-              -H "apikey: $N8N_APIKEY" \
-              -H "Content-Type: application/json" \
-              -d "$PAYLOAD" >/dev/null
+            PAYLOAD="$(jq -n --arg tel "$1" --arg msg "$MSG" \
+              '{tipo:"wa",telefono:$tel,mensajeWA:$msg,instanciaWA:"Pruebas de todo"}')"
+            for intento in 1 2 3; do
+              CODE="$(curl -s -o /tmp/n8n.out -w '%{http_code}' --max-time 20 \
+                -X POST "$N8N_WEBHOOK" -H "apikey: $N8N_APIKEY" \
+                -H "Content-Type: application/json" -d "$PAYLOAD" || echo 000)"
+              case "$CODE" in 2*) return 0 ;; esac
+              echo "Intento ${intento} falló (HTTP ${CODE}): $(cat /tmp/n8n.out)"
+              sleep $((intento * 5))
+            done
+            return 1
           }
-          # Teléfono de CADA autor desde Firestore (lectura vía service account)
-          ACCESS_TOKEN="$(gcloud auth print-access-token 2>/dev/null || true)"
+
+          FALLOS=0
           while IFS= read -r AUTOR; do
             [ -z "$AUTOR" ] && continue
             PHONE=""
             if [ -n "$ACCESS_TOKEN" ]; then
-              PHONE="$(curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
+              PHONE="$(curl -s --max-time 20 -H "Authorization: Bearer $ACCESS_TOKEN" \
                 "https://firestore.googleapis.com/v1/projects/${FIRESTORE_PROJECT}/databases/(default)/documents/contributors/${AUTOR}" \
                 | jq -r '.fields.telefonoWhatsapp.stringValue // empty')"
             fi
-            if [ -n "$PHONE" ]; then
-              send "+521${PHONE}" && echo "Notificado autor ${AUTOR}"
+            if [ -z "$PHONE" ]; then
+              echo "::warning::Sin teléfono guardado para '${AUTOR}'; se omite. Agrégalo en la pestaña Contribuidores."
+              continue
+            fi
+            if send "+521${PHONE}"; then
+              echo "Notificado autor ${AUTOR}"
             else
-              echo "Sin teléfono guardado para '${AUTOR}'; se omite."
+              echo "::error::No se pudo notificar a ${AUTOR} tras 3 intentos"
+              FALLOS=$((FALLOS + 1))
             fi
           done <<< "$AUTORES"
-          send "$ADMIN" && echo "Notificado admin"
+          exit "$FALLOS"
