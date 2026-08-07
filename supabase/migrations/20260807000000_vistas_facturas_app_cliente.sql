@@ -247,9 +247,24 @@ REVOKE ALL PRIVILEGES ON TABLE public.vw_unidad_por_cuenta     FROM anon, authen
 REVOKE ALL PRIVILEGES ON TABLE public.vw_evidencia_facturas    FROM anon, authenticated;
 REVOKE ALL PRIVILEGES ON TABLE public.vw_app_cliente_facturas  FROM anon, authenticated;
 
-GRANT SELECT ON TABLE public.vw_unidad_por_cuenta     TO service_role, georgia_mcp_ro;
-GRANT SELECT ON TABLE public.vw_evidencia_facturas    TO service_role, georgia_mcp_ro;
-GRANT SELECT ON TABLE public.vw_app_cliente_facturas  TO service_role, georgia_mcp_ro;
+GRANT SELECT ON TABLE public.vw_unidad_por_cuenta     TO service_role;
+GRANT SELECT ON TABLE public.vw_evidencia_facturas    TO service_role;
+GRANT SELECT ON TABLE public.vw_app_cliente_facturas  TO service_role;
+
+-- `georgia_mcp_ro` (lectura por MCP, solo para diagnóstico) existe en prod pero NO en
+-- dev: un GRANT incondicional aborta el `supabase db push` de deploy-dev con
+-- «role "georgia_mcp_ro" does not exist». Mismo guard que 20260723000000.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'georgia_mcp_ro') THEN
+    RAISE NOTICE 'Rol georgia_mcp_ro no existe; se omite el GRANT de lectura.';
+    RETURN;
+  END IF;
+
+  GRANT SELECT ON TABLE public.vw_unidad_por_cuenta    TO georgia_mcp_ro;
+  GRANT SELECT ON TABLE public.vw_evidencia_facturas   TO georgia_mcp_ro;
+  GRANT SELECT ON TABLE public.vw_app_cliente_facturas TO georgia_mcp_ro;
+END $$;
 
 -- Rollback:
 --   DROP VIEW IF EXISTS public.vw_app_cliente_facturas;
