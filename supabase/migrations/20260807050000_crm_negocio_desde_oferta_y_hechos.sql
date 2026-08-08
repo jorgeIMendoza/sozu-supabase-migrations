@@ -48,6 +48,17 @@
 --    toda función nueva en `public` recibe EXECUTE para `anon` y `authenticated`, así que
 --    cualquiera con la publishable key podría mover cualquier negocio a `ganado`. Se revoca.
 -- 5. EL CIERRE POR NO AVANCE TAMBIÉN SE EMPAREJA POR UNIDAD, por la misma razón que (1).
+-- 6. `id_producto` SOLO SI NO HAY UNIDAD. Esto tumbó el primer intento de deploy en dev:
+--        ERROR: duplicate key value violates unique constraint "crm_negocios_producto_uk"
+--        Key (id_entidad_relacionada, id_producto)=(1909, 7) already exists.
+--    En prod **1,162 ofertas activas traen propiedad Y producto, y CERO traen producto sin
+--    propiedad**: el producto es un accesorio de la unidad (bodega, estacionamiento), no la
+--    unidad. La persona 1208 tiene dos ofertas con propiedades distintas (4779 y 4793) y el
+--    mismo producto 7, así que ambos negocios salían con el mismo (contacto, producto) y
+--    chocaban contra el único del 02. El `NOT EXISTS` no lo atrapaba porque no ve las filas
+--    del propio INSERT.
+--    Se guarda `id_producto` únicamente cuando `id_propiedad` es NULL —que es lo que el modelo
+--    dice: la llave es la unidad— y se agrega `ON CONFLICT DO NOTHING` como red.
 --
 -- Este archivo no toca `acuerdos_pago` (ya carga 7 triggers, dos de ellos con
 -- `verificar_propiedad_vendida()` solapados) ni reactiva nada: `propiedades` tiene
@@ -221,14 +232,20 @@ BEGIN
     RETURN NEW;                              -- la etapa NO retrocede: la mueven los hechos
   END IF;
 
+  -- `id_producto` SOLO cuando no hay unidad: si la oferta trae las dos cosas, el producto es
+  -- un accesorio de la unidad (bodega, estacionamiento) y guardarlo aquí duplicaría el grano.
+  -- Ver «Corrección 6» en el encabezado.
   INSERT INTO public.crm_negocios
     (nombre, id_pipeline, id_etapa, id_oferta, id_propiedad, id_producto,
      id_entidad_relacionada, id_usuario_propietario, valor, moneda, activo,
      ofertas_count, requiere_triage)
   VALUES
     (coalesce(v_nombre, 'Negocio ' || NEW.id), v_pipeline, v_etapa, NEW.id,
-     NEW.id_propiedad, NEW.id_producto, v_id_er, v_auth, v_valor, 'MXN', true,
-     1, (v_id_er IS NULL OR v_auth IS NULL));
+     NEW.id_propiedad,
+     CASE WHEN NEW.id_propiedad IS NULL THEN NEW.id_producto END,
+     v_id_er, v_auth, v_valor, 'MXN', true,
+     1, (v_id_er IS NULL OR v_auth IS NULL))
+  ON CONFLICT DO NOTHING;
 
   RETURN NEW;
 
@@ -467,7 +484,9 @@ SELECT
   coalesce(r.proyecto,'') || ' ' || coalesce(r.unidad,'') || ' - ' || r.persona,
   (SELECT id FROM public.crm_pipelines WHERE clave = 'ventas_sozu'),
   public.fn_crm_etapa('oferta_enviada'),
-  r.id_oferta, r.id_propiedad, r.id_producto, r.id_er, r.auth_user_id,
+  r.id_oferta, r.id_propiedad,
+  CASE WHEN r.id_propiedad IS NULL THEN r.id_producto END,   -- ver «Corrección 6»
+  r.id_er, r.auth_user_id,
   r.valor, 'MXN', true, r.n_ofertas,
   (r.id_er IS NULL OR r.auth_user_id IS NULL)
 FROM representativa r
@@ -476,7 +495,8 @@ WHERE NOT EXISTS (
   WHERE n.activo
     AND n.id_entidad_relacionada IS NOT DISTINCT FROM r.id_er
     AND ((r.id_propiedad IS NOT NULL AND n.id_propiedad = r.id_propiedad)
-      OR (r.id_propiedad IS NULL AND r.id_producto IS NOT NULL AND n.id_producto = r.id_producto)));
+      OR (r.id_propiedad IS NULL AND r.id_producto IS NOT NULL AND n.id_producto = r.id_producto)))
+ON CONFLICT DO NOTHING;   -- red de seguridad: el NOT EXISTS no ve las filas de este mismo INSERT
 
 -- ─────────────────────────────────────────────────────────────────────
 -- 8. Backfill 2: avanzar por apartado ya aplicado (508 pares en prod).
