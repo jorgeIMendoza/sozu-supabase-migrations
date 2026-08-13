@@ -33,7 +33,19 @@
 -- `public.pagos_stp_raw` NO se toca, igual que en la migración del 29 de julio: queda con
 -- RLS apagada por indicación expresa.
 --
--- Idempotente: guardado por existencia de tabla, de política y por relrowsecurity.
+-- ─── El dueño de la tabla no es el mismo en los dos entornos ─────────────────
+-- Primer intento de esta migración murió en dev con
+--   ERROR: must be owner of table _bak_personas_ocupacion_20260722 (SQLSTATE 42501)
+-- porque en dev esa tabla es de `supabase_admin` y en prod es de `postgres`. El CI corre
+-- como `postgres`, que NO es miembro de `supabase_admin`, así que no puede alterarla ni
+-- tomar posesión. ALTER TABLE, REVOKE, CREATE POLICY y DROP TABLE exigen ser dueño.
+--
+-- Por eso cada bloque comprueba la propiedad antes de actuar: lo que es de otro rol se
+-- reporta con WARNING y se deja intacto. Fallar ahí solo tumbaría el deploy sin cerrar
+-- nada; queda como pendiente explícito para quien tenga ese rol.
+--
+-- Idempotente: guardado por existencia de tabla, de política, por relrowsecurity y por
+-- propiedad.
 -- =============================================================================
 
 BEGIN;
@@ -48,14 +60,30 @@ DO $rls$
 DECLARE
   v_tabla text;
   v_pol   text;
+  v_oid   oid;
 BEGIN
   FOREACH v_tabla IN ARRAY ARRAY[
     '_bak_documentos_estatus_20260803',
     '_bak_personas_ocupacion_20260722'
   ]
   LOOP
-    IF to_regclass('public.' || quote_ident(v_tabla)) IS NULL THEN
+    v_oid := to_regclass('public.' || quote_ident(v_tabla));
+
+    IF v_oid IS NULL THEN
       RAISE NOTICE 'public.% no existe en este entorno, se omite', v_tabla;
+      CONTINUE;
+    END IF;
+
+    -- ALTER TABLE, REVOKE y CREATE POLICY exigen ser dueño de la tabla. El CI corre como
+    -- `postgres`, y el dueño no es el mismo en los dos entornos: en dev
+    -- `_bak_personas_ocupacion_20260722` es de `supabase_admin`, y `postgres` no es
+    -- miembro de ese rol. Sin esta guarda la migración muere con 42501 y tumba el deploy.
+    IF NOT pg_has_role(current_user, (SELECT relowner FROM pg_class WHERE oid = v_oid), 'USAGE') THEN
+      RAISE WARNING
+        'public.% es de % y % no puede alterarla: queda SIN RLS. Hay que cerrarla con el rol dueño.',
+        v_tabla,
+        (SELECT relowner::regrole::text FROM pg_class WHERE oid = v_oid),
+        current_user;
       CONTINUE;
     END IF;
 
@@ -95,9 +123,18 @@ $rls$;
 DO $drop$
 DECLARE
   v_filas bigint;
+  v_oid   oid := to_regclass('public._bak_conflicto_dueno_lead_20260807');
 BEGIN
-  IF to_regclass('public._bak_conflicto_dueno_lead_20260807') IS NULL THEN
+  IF v_oid IS NULL THEN
     RAISE NOTICE '_bak_conflicto_dueno_lead_20260807 no existe en este entorno, nada que hacer';
+    RETURN;
+  END IF;
+
+  -- DROP TABLE también exige ser dueño.
+  IF NOT pg_has_role(current_user, (SELECT relowner FROM pg_class WHERE oid = v_oid), 'USAGE') THEN
+    RAISE WARNING
+      '_bak_conflicto_dueno_lead_20260807 es de % y % no puede tocarla: queda como está.',
+      (SELECT relowner::regrole::text FROM pg_class WHERE oid = v_oid), current_user;
     RETURN;
   END IF;
 
@@ -133,9 +170,13 @@ $drop$;
 -- -----------------------------------------------------------------------------
 -- §C. Self-verifying: ningún `_bak_*` puede quedar sin RLS
 -- -----------------------------------------------------------------------------
+-- Solo se exige sobre lo que este rol podía tocar. Lo que es de otro dueño se reporta
+-- como WARNING y queda para quien tenga ese rol: fallar aquí solo tumbaría el deploy sin
+-- arreglar nada.
 DO $check$
 DECLARE
   v_abiertas text;
+  v_ajenas   text;
 BEGIN
   SELECT string_agg(c.relname, ', ')
     INTO v_abiertas
@@ -144,10 +185,25 @@ BEGIN
   WHERE n.nspname = 'public'
     AND c.relkind = 'r'
     AND c.relname LIKE '\_bak\_%'
-    AND NOT c.relrowsecurity;
+    AND NOT c.relrowsecurity
+    AND pg_has_role(current_user, c.relowner, 'USAGE');
 
   IF v_abiertas IS NOT NULL THEN
-    RAISE EXCEPTION 'Quedaron respaldos sin RLS: %', v_abiertas;
+    RAISE EXCEPTION 'Quedaron respaldos sin RLS y sí eran de este rol: %', v_abiertas;
+  END IF;
+
+  SELECT string_agg(c.relname || ' (dueño ' || c.relowner::regrole::text || ')', ', ')
+    INTO v_ajenas
+  FROM pg_class c
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+  WHERE n.nspname = 'public'
+    AND c.relkind = 'r'
+    AND c.relname LIKE '\_bak\_%'
+    AND NOT c.relrowsecurity
+    AND NOT pg_has_role(current_user, c.relowner, 'USAGE');
+
+  IF v_ajenas IS NOT NULL THEN
+    RAISE WARNING 'PENDIENTE: respaldos sin RLS que este rol no puede cerrar → %', v_ajenas;
   END IF;
 END;
 $check$;
