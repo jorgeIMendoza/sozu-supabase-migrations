@@ -2,6 +2,20 @@
 -- Fecha: 2026-08-12
 -- Origen: Ejecuciones/ejecusiones.md
 --
+-- ─── Por qué el timestamp es 20260812183000 y no 20260812010000 ───────────────
+-- Este archivo nacio como 20260812010000 y colisiono con
+-- 20260812010000_crm_crear_contacto_upsert_fix.sql, que entro a dev por otro PR con el
+-- MISMO prefijo. `supabase db push` usa esos 14 digitos como `version`, que es la PK de
+-- supabase_migrations.schema_migrations, asi que el segundo archivo en aplicarse revienta:
+--
+--   ERROR: duplicate key value violates unique constraint "schema_migrations_pkey"
+--   Key (version)=(20260812010000) already exists.
+--
+-- El SQL de este archivo llego a ejecutarse (el NOTICE reporto los ids 68, 69 y 70) pero
+-- todo se revirtio con la transaccion, asi que los tipos NO quedaron dados de alta —
+-- verificado read-only contra produccion. Con el prefijo cambiado, el CLI lo ve como una
+-- migracion pendiente distinta y lo aplica limpio. NO renombrar de vuelta.
+--
 -- ─── Qué cambia ───────────────────────────────────────────────────────────────
 -- Alta en el catalogo public.tipos_documento de los tres tipos que hoy no existen y que
 -- se necesitan para documentar una cuenta de cobranza cancelada (de propiedad o de
