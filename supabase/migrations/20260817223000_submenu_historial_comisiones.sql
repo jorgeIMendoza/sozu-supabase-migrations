@@ -2,10 +2,24 @@
 -- Fecha: 2026-08-17
 -- Origen: Ejecuciones/ejecusiones.md
 --
--- Timestamp 200000 para quedar despues de 20260817000000, 20260817180000 y 20260817190000,
--- ya presentes con la fecha de hoy. Los 14 digitos son la PK de
--- supabase_migrations.schema_migrations: dos archivos con el mismo prefijo tumban el deploy
--- del segundo (paso el 2026-08-12).
+-- ─── Por qué el prefijo es 223000 y no 200000 ─────────────────────────────────
+-- Este archivo nacio como 20260817200000 y colisiono con
+-- 20260817200000_fk_cobranza_sin_cascade.sql, que entro a dev por otro PR con el MISMO
+-- prefijo mientras este estaba abierto. Los 14 digitos son la `version` y la PK de
+-- supabase_migrations.schema_migrations, asi que el segundo archivo en aplicarse revienta:
+--
+--   ERROR: duplicate key value violates unique constraint "schema_migrations_pkey"
+--   Key (version)=(20260817200000) already exists.
+--
+-- El SQL llego a ejecutarse (el NOTICE reporto el submenu id 393) pero todo se revirtio
+-- con la transaccion, asi que el submenu NO quedo dado de alta. Se renombra este archivo y
+-- no el ajeno, que ya esta aplicado y registrado: cambiarle el prefijo obligaria a
+-- reconciliar schema_migrations a mano. NO renombrar de vuelta.
+--
+-- Es la segunda vez que pasa (la primera fue el 2026-08-12 con
+-- 20260812010000_crm_crear_contacto_upsert_fix.sql). Verificar los prefijos antes de abrir
+-- el PR no basta: otro PR puede mergear el mismo prefijo despues. La defensa real es un
+-- chequeo de prefijos duplicados en el CI, antes del `supabase db push`.
 --
 -- ─── Qué hace ─────────────────────────────────────────────────────────────────
 -- Registra el submenu en `submenus` + `submenus_permisos` para que exista dentro del
