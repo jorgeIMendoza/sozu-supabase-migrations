@@ -7,6 +7,16 @@
 -- supabase_migrations.schema_migrations: dos archivos con el mismo prefijo tumban el deploy
 -- del segundo (paso el 2026-08-12).
 --
+-- Renombrado a 230000 el 2026-08-17: 200000 ya lo tenia
+-- 20260817200000_fk_cobranza_sin_cascade.sql, que venia en dev y main desde antes y ya esta
+-- aplicado en dev y prod. Este archivo era el segundo con ese prefijo y tumbo el deploy
+-- exactamente como advierte el parrafo de arriba:
+--   ERROR: duplicate key value violates unique constraint "schema_migrations_pkey"
+--   Key (version)=(20260817200000) already exists.
+-- El DDL hizo rollback completo (el submenu no llego a crearse en dev), asi que aplicar este
+-- archivo con la version nueva lo crea limpio. Solo cambio el nombre del archivo; el SQL es
+-- identico.
+--
 -- ─── Qué hace ─────────────────────────────────────────────────────────────────
 -- Registra el submenu en `submenus` + `submenus_permisos` para que exista dentro del
 -- control de acceso. Sin esas filas el submenu NO EXISTE para el sistema de permisos y no
