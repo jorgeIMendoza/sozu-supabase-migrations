@@ -1,6 +1,13 @@
--- 20260817190000_fk_cobranza_sin_cascade.sql
+-- 20260817200000_fk_cobranza_sin_cascade.sql
 -- Propósito: cerrar una ruta de borrado en cascada del histórico financiero y declarar la
 -- FK que faltaba entre cuentas_cobranza y propiedades.
+--
+-- Nota de versión: este archivo nació como 20260817190000 y se renombró. Ese timestamp lo
+-- tomó en paralelo 20260817190000_portal_personal_menu_submenus_permisos.sql (PR #610), que
+-- se mergeó primero y ganó la fila en supabase_migrations.schema_migrations, cuya PK es solo
+-- la versión. Con las dos versiones iguales, `supabase db push` reventó en deploy-dev con
+-- "duplicate key value violates unique constraint schema_migrations_pkey" y esta migración
+-- nunca llegó a aplicarse.
 --
 -- PUNTO 1 — CASCADE escondido detrás de una FK duplicada
 --
