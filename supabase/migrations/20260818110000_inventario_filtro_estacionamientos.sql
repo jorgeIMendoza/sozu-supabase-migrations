@@ -42,10 +42,12 @@ BEGIN
     RAISE EXCEPTION 'anchor: public.get_inventario_disponible_v2 no existe';
   END IF;
 
-  -- Acepta el estado previo (12 args, termina en numeric, numeric) y el ya migrado
-  -- (13 args, termina en integer[]). Cualquier otra cosa es drift.
-  IF v_args NOT LIKE '%numeric, numeric'
-     AND v_args NOT LIKE '%numeric, numeric, integer[]'
+  -- pg_get_function_identity_arguments devuelve NOMBRE + tipo, no solo tipos, así que
+  -- el anclaje va contra el último parámetro por nombre.
+  -- Acepta el estado previo (termina en p_max_price numeric) y el ya migrado (termina en
+  -- p_estacionamientos integer[]). Cualquier otra cosa es drift.
+  IF v_args NOT LIKE '%p_max_price numeric'
+     AND v_args NOT LIKE '%p_estacionamientos integer[]'
   THEN
     RAISE EXCEPTION
       'anchor: get_inventario_disponible_v2 tiene una firma inesperada (%); revisar drift',
