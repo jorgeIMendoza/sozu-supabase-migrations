@@ -20,6 +20,27 @@ jobs:
           # con "rate limit exceeded" en runners compartidos.
           version: 2.105.0
 
+      - name: Verificar prefijos de migracion unicos
+        # Los 14 digitos del nombre son la `version` y la PK de
+        # supabase_migrations.schema_migrations. Dos archivos con el mismo prefijo rompen el
+        # deploy del segundo, y peor: el CLI toma solo uno de ellos, asi que el otro queda
+        # IGNORADO EN SILENCIO y su SQL nunca se aplica. Ha pasado tres veces (2026-08-12,
+        # 2026-08-17 y 2026-08-18), siempre porque dos PR abiertos a la vez eligieron la
+        # misma hora redonda. Verificarlo antes de abrir el PR no basta: la colision aparece
+        # al mergear. Aqui se detecta en segundos y con un mensaje claro.
+        run: |
+          dups=$(ls supabase/migrations/*.sql | sed 's|.*/||' | cut -c1-14 | sort | uniq -d)
+          if [ -n "$dups" ]; then
+            echo "::error::Prefijos de migracion duplicados: $dups"
+            for d in $dups; do
+              echo "  $d ->"
+              ls supabase/migrations/${d}_*.sql | sed 's|.*/|    |'
+            done
+            echo "Renombrar uno de los archivos a una hora libre y reintentar."
+            exit 1
+          fi
+          echo "Sin prefijos duplicados."
+
       - name: Deploy migrations to production
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}

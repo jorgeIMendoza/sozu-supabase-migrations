@@ -15,11 +15,19 @@
 -- control. `es_aprobado` deja de aceptarse desde el payload — si el cliente pudiera mandar
 -- true, el flujo de aprobacion seria decorativo.
 --
+-- ─── Por qué el prefijo es 143800 y no 120000 ─────────────────────────────────
+-- Este archivo nacio como 20260818120000 y colisiono con
+-- 20260818120000_crm_negocios_ia.sql, que entro a dev por otro PR con el mismo prefijo.
+-- El efecto fue peor que un error: con dos archivos compartiendo `version`, el CLI toma
+-- solo uno y este quedaba IGNORADO EN SILENCIO —no aparecio ni en la lista de pendientes
+-- del deploy—, asi que las tres funciones nunca se habrian aplicado sin que nada fallara.
+-- NO renombrar de vuelta.
+--
 -- ─── La guarda de id_edificio_modelo ya es la FINAL ───────────────────────────
 -- El documento entrega la funcion con la guarda vieja y luego, en su segunda parte, indica
 -- sustituirla. Aqui se escribe directamente la version final: generar la intermedia y
 -- reemplazarla en el mismo PR seria 230 lineas de ruido. Requiere que
--- 20260818110000_propiedades_activos_sin_desarrollo.sql ya haya corrido, y por eso lleva un
+-- 20260818143700_propiedades_activos_sin_desarrollo.sql ya haya corrido, y por eso lleva un
 -- timestamp posterior.
 --
 -- ─── Cómo se construyó el cuerpo ──────────────────────────────────────────────
@@ -117,7 +125,7 @@ BEGIN
       AND column_name = 'id_edificio_modelo' AND is_nullable = 'YES'
   ) THEN
     RAISE EXCEPTION
-      'propiedades.id_edificio_modelo sigue siendo NOT NULL. Aplicar primero 20260818110000_propiedades_activos_sin_desarrollo.sql, o esta funcion aceptaria activos sueltos que la columna rechaza.';
+      'propiedades.id_edificio_modelo sigue siendo NOT NULL. Aplicar primero 20260818143700_propiedades_activos_sin_desarrollo.sql, o esta funcion aceptaria activos sueltos que la columna rechaza.';
   END IF;
 END
 $guard$;
