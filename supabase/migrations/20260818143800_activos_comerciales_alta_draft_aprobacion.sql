@@ -486,6 +486,7 @@ COMMENT ON FUNCTION public.rechazar_activo_comercial(bigint) IS
 DO $cierre$
 DECLARE
   v_def text;
+  v_n   int;
 BEGIN
   SELECT pg_get_functiondef(p.oid) INTO v_def
   FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
@@ -495,16 +496,22 @@ BEGIN
     RAISE EXCEPTION 'crear_activo_comercial sigue con el gate viejo: el CREATE OR REPLACE no surtio efecto.';
   END IF;
 
-  IF v_def NOT LIKE '%false,   -- BORRADOR%' THEN
-    RAISE EXCEPTION 'crear_activo_comercial no esta forzando es_aprobado = false: el activo no naceria en borrador.';
+  -- Se comprueba que el payload ya NO puede decidir es_aprobado, en vez de buscar el texto
+  -- del comentario: cualquier reformateo de espacios rompia la comparacion anterior y
+  -- habria abortado el deploy en falso.
+  IF v_def LIKE '%es_aprobado''%' THEN
+    RAISE EXCEPTION 'crear_activo_comercial sigue leyendo es_aprobado del payload: el activo no naceria siempre en borrador.';
   END IF;
 
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-    WHERE n.nspname = 'public' AND p.proname IN ('aprobar_activo_comercial','rechazar_activo_comercial')
-    GROUP BY true HAVING count(*) = 2
-  ) THEN
-    RAISE EXCEPTION 'Faltan aprobar_activo_comercial o rechazar_activo_comercial.';
+  SELECT count(*) INTO v_n
+  FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+  WHERE n.nspname = 'public'
+    AND p.proname IN ('aprobar_activo_comercial','rechazar_activo_comercial');
+
+  IF v_n <> 2 THEN
+    RAISE EXCEPTION
+      'Se esperaban aprobar_activo_comercial y rechazar_activo_comercial, y hay % de las dos.',
+      v_n;
   END IF;
 
   RAISE NOTICE
