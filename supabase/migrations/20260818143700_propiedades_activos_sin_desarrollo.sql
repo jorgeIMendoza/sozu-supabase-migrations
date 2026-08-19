@@ -13,6 +13,14 @@
 -- `crear_activo_comercial` (20260818120000), segun el tipo y segun lo que declare el
 -- payload.
 --
+-- ─── Por qué el prefijo es 143700 y no 110000 ─────────────────────────────────
+-- Este archivo nacio como 20260818110000 y colisiono con
+-- 20260818110000_inventario_filtro_estacionamientos.sql, que entro a dev por otro PR con
+-- el mismo prefijo. Los 14 digitos son la `version` y la PK de
+-- supabase_migrations.schema_migrations, asi que el segundo en aplicarse revienta. El SQL
+-- llego a ejecutarse (el NOTICE reporto la columna ya nullable) pero se revirtio con la
+-- transaccion: la columna sigue NOT NULL. NO renombrar de vuelta.
+--
 -- ─── Por qué este archivo va ANTES que el de las funciones ────────────────────
 -- El documento lista el orden inverso (primero alta-draft, luego activos sin desarrollo),
 -- que es el correcto si se aplican en dias distintos. Aplicandose en el mismo deploy el
