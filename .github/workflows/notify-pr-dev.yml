@@ -14,9 +14,10 @@
 #   - sozu-com/server-stp
 #
 # La instancia, el webhook, la apikey y el teléfono del admin YA NO se escriben
-# aquí: salen de la configuración de la EMPRESA dueña del repo (dashboard →
-# Configuración → Notificaciones), con el default global como respaldo. Ver el
-# bloque `RESOLVER_WA` de abajo y `ci-templates/README.md`.
+# aquí: salen ÚNICAMENTE de la configuración de la EMPRESA dueña del repo
+# (dashboard → Configuración → Notificaciones). No hay default global ni
+# herencia: o la empresa está configurada, o no se manda nada. Ver el bloque
+# `RESOLVER_WA` de abajo y `ci-templates/README.md`.
 #
 # El aviso al admin y el aviso a los autores van en JOBS SEPARADOS, y ninguno
 # usa actions del marketplace: el 2026-08-06 un "Service Unavailable" al
@@ -51,11 +52,21 @@ env:
   #   WA_WEBHOOK   webhook de n8n al que se postea
   #   WA_APIKEY    apikey del webhook (enmascarada con ::add-mask:: al leerla)
   #   WA_ADMIN     teléfono que recibe los avisos administrativos (E.164)
-  #   WA_ENABLED   "true"/"false": si es "false" no se manda nada
+  #   WA_ENABLED   "true" solo si la empresa está configurada Y no apagó los
+  #                avisos; con cualquier otro valor NO se manda nada
+  #   WA_MOTIVO    por qué no se manda, para que el step de envío lo imprima
   #   WA_GCP_TOKEN access token de Google, para reusarlo en el mismo job
   #
-  # Cascada: gana el campo que la empresa tenga con valor; el vacío o ausente se
-  # hereda del global. Igual con la apikey.
+  # TODO ES POR EMPRESA O NO SE MANDA NADA: se lee la empresa dueña del repo y
+  # solo sus documentos. Ya no hay `settings/notifications` ni `secrets/whatsapp`
+  # globales, ni cascada que herede de ellos, porque con un default global la
+  # empresa que todavía no configuraba sus avisos los recibía por el número de
+  # otra, y su webhook podía acabar llevándose una llave que no era suya. Sin
+  # nada que heredar, esos dos problemas desaparecen.
+  #
+  # Un repo sin empresa configurada NO es un error de CI: se explica en el log y
+  # los steps de envío salen con `exit 0`, para no pintar en rojo los checks de
+  # cada PR de un repo que simplemente no tiene avisos dados de alta.
   # ---------------------------------------------------------------------------
   RESOLVER_WA: |
     # --- Access token de Google (JWT firmado con openssl) --------------------
@@ -98,30 +109,28 @@ env:
     # `enabled` ausente = prendido. Ojo: `// empty` no sirve para booleanos
     # (jq trata `false` como vacío), por eso se mira el tipo del campo.
     prendido() { printf '%s' "$1" | jq -r 'if (.fields.enabled | type) == "object" then (.fields.enabled.booleanValue | tostring) else "" end'; }
-    gana() { if [ -n "$1" ]; then printf '%s' "$1"; else printf '%s' "$2"; fi; }
 
     # --- Empresa dueña del repo ----------------------------------------------
     # repos/{owner__repo}.projectId -> projects/{projectId}.clientId
+    # Sin empresa no hay a quién ni por dónde notificar: ya no queda ningún
+    # default global del que tirar (y menos mal: era el que mandaba los avisos
+    # de una empresa por el número de otra).
     REPO_ID="${GITHUB_REPOSITORY/\//__}"
     CLIENT_ID=""
+    WA_MOTIVO=""
     PROJECT_ID="$(campo "$(leer "repos/${REPO_ID}")" projectId)"
     if [ -z "$PROJECT_ID" ]; then
-      echo "El repo '${GITHUB_REPOSITORY}' no está dado de alta en el dashboard (repos/${REPO_ID}); se usa la configuración global."
+      WA_MOTIVO="El repo '${GITHUB_REPOSITORY}' no está dado de alta en el dashboard (repos/${REPO_ID}), así que no se sabe de qué empresa es."
     else
       CLIENT_ID="$(campo "$(leer "projects/${PROJECT_ID}")" clientId)"
       if [ -z "$CLIENT_ID" ]; then
-        echo "El proyecto '${PROJECT_ID}' no tiene empresa asignada; se usa la configuración global."
+        WA_MOTIVO="El proyecto '${PROJECT_ID}' no tiene empresa asignada. Asígnale una en el dashboard → Proyectos."
       else
         echo "Empresa dueña del repo: '${CLIENT_ID}' (proyecto '${PROJECT_ID}')."
       fi
     fi
 
-    # --- Configuración global (default) --------------------------------------
-    G_DOC="$(leer "settings/notifications")"
-    G_KEY="$(campo "$(leer "secrets/whatsapp")" apiKey)"
-    if [ -n "$G_KEY" ]; then echo "::add-mask::${G_KEY}"; fi
-
-    # --- Configuración de la empresa -----------------------------------------
+    # --- Configuración de la empresa (la única que hay) ----------------------
     C_DOC=""
     C_KEY=""
     if [ -n "$CLIENT_ID" ]; then
@@ -130,31 +139,30 @@ env:
       if [ -n "$C_KEY" ]; then echo "::add-mask::${C_KEY}"; fi
     fi
 
-    # --- Cascada: lo de la empresa gana, lo vacío se hereda del global --------
-    WA_INSTANCE="$(gana "$(campo "$C_DOC" instance)" "$(campo "$G_DOC" instance)")"
-    C_WEBHOOK="$(campo "$C_DOC" webhookUrl)"
-    WA_WEBHOOK="$(gana "$C_WEBHOOK" "$(campo "$G_DOC" webhookUrl)")"
-    WA_ADMIN="$(gana "$(campo "$C_DOC" adminPhone)" "$(campo "$G_DOC" adminPhone)")"
-    WA_APIKEY="$(gana "$C_KEY" "$G_KEY")"
+    WA_INSTANCE="$(campo "$C_DOC" instance)"
+    WA_WEBHOOK="$(campo "$C_DOC" webhookUrl)"
+    WA_ADMIN="$(campo "$C_DOC" adminPhone)"
+    WA_APIKEY="$C_KEY"
 
-    # El webhook y la apikey van EN PAREJA. Una empresa con webhook propio y sin
-    # apikey propia recibiría la llave GLOBAL en una URL que ella misma eligió:
-    # con esa llave podría mandar mensajes a nombre de cualquier otra empresa.
-    # Se hereda todo del global, o se pone el par completo.
-    if [ -n "$C_WEBHOOK" ] && [ -z "$C_KEY" ]; then
-      echo "::error::La empresa '${CLIENT_ID}' tiene webhook propio pero no apikey propia. No se manda nada: la llave global no viaja a un webhook de cliente. Captura su apikey en Configuración → Notificaciones."
-      exit 1
-    fi
-
-    # Apagar manda: basta con que la empresa O el global estén apagados.
+    # `enabled: false` de la empresa apaga sus avisos; ausente = prendido.
     WA_ENABLED=true
-    if [ "$(prendido "$G_DOC")" = "false" ]; then
+    if [ -n "$WA_MOTIVO" ]; then
       WA_ENABLED=false
-      echo "Las notificaciones de WhatsApp están apagadas en la configuración global."
-    fi
-    if [ "$(prendido "$C_DOC")" = "false" ]; then
+    elif [ "$(prendido "$C_DOC")" = "false" ]; then
       WA_ENABLED=false
-      echo "La empresa '${CLIENT_ID}' tiene apagadas las notificaciones de WhatsApp."
+      WA_MOTIVO="La empresa '${CLIENT_ID}' tiene apagadas las notificaciones de WhatsApp."
+    else
+      # Se enumera lo que falta, no un genérico: quien lea el log tiene que
+      # saber qué campo ir a capturar. El webhook y la apikey ya no pueden
+      # venir de dueños distintos, así que no hay nada que emparejar.
+      FALTAN=""
+      if [ -z "$WA_INSTANCE" ]; then FALTAN="${FALTAN}instancia, "; fi
+      if [ -z "$WA_WEBHOOK" ];  then FALTAN="${FALTAN}webhook, ";   fi
+      if [ -z "$WA_APIKEY" ];   then FALTAN="${FALTAN}apikey, ";    fi
+      if [ -n "$FALTAN" ]; then
+        WA_ENABLED=false
+        WA_MOTIVO="La empresa '${CLIENT_ID}' no tiene ${FALTAN%, } de WhatsApp. Captúralo en el dashboard → Configuración → Notificaciones."
+      fi
     fi
 
     # --- Exportar al resto de los steps (nunca se imprime la apikey) ----------
@@ -164,18 +172,16 @@ env:
     exportar WA_APIKEY   "$WA_APIKEY"
     exportar WA_ADMIN    "$WA_ADMIN"
     exportar WA_ENABLED  "$WA_ENABLED"
+    exportar WA_MOTIVO   "$WA_MOTIVO"
     exportar WA_GCP_TOKEN "$ACCESS_TOKEN"
 
     if [ -n "$WA_APIKEY" ]; then HAY_KEY="sí"; else HAY_KEY="NO"; fi
-    echo "Instancia: '${WA_INSTANCE}' | webhook: '${WA_WEBHOOK}' | admin: '${WA_ADMIN}' | apikey: ${HAY_KEY} | activas: ${WA_ENABLED}"
+    echo "Empresa: '${CLIENT_ID}' | instancia: '${WA_INSTANCE}' | webhook: '${WA_WEBHOOK}' | apikey: ${HAY_KEY} | activas: ${WA_ENABLED}"
 
+    # Que una empresa no esté configurada no es un error de CI: se dice y ya.
+    # Fallar aquí pintaría en rojo el check de CADA PR de ese repo.
     if [ "$WA_ENABLED" != "true" ]; then
-      echo "No se enviará ninguna notificación de WhatsApp."
-    elif [ -z "$WA_WEBHOOK" ] || [ -z "$WA_APIKEY" ]; then
-      echo "::error::Falta el webhook o la apikey de WhatsApp (ni la de la empresa ni la global). Configúralos en el dashboard: Configuración → Notificaciones."
-      exit 1
-    elif [ -z "$WA_INSTANCE" ]; then
-      echo "::warning::Sin instancia de WhatsApp configurada; n8n puede rechazar el envío."
+      echo "No se enviará ninguna notificación de WhatsApp. ${WA_MOTIVO}"
     fi
 
 jobs:
@@ -198,13 +204,15 @@ jobs:
           REPO_NAME: ${{ github.event.repository.name }}
           ACTOR: ${{ github.actor }}
         run: |
+          # Empresa sin configurar (o con los avisos apagados) no notifica, y no
+          # es un fallo de CI: se sale en verde para no ensuciar el check del PR.
           if [ "$WA_ENABLED" != "true" ]; then
-            echo "Notificaciones apagadas para esta empresa; no se envía nada."
+            echo "No se envía nada. ${WA_MOTIVO:-Notificaciones de WhatsApp no configuradas para esta empresa.}"
             exit 0
           fi
           if [ -z "$WA_ADMIN" ]; then
-            echo "::error::Sin teléfono de admin configurado (dashboard → Configuración → Notificaciones)"
-            exit 1
+            echo "La empresa no tiene teléfono administrativo configurado (dashboard → Configuración → Notificaciones); no se envía el aviso al admin."
+            exit 0
           fi
           # Detectar TODOS los autores reales desde el body (una línea
           # <!-- pr_author: login --> por autor; el dashboard las embebe).
@@ -251,13 +259,15 @@ jobs:
           REPO: ${{ github.event.repository.name }}
           CERRADO_POR: ${{ github.actor }}
         run: |
+          # Empresa sin configurar (o con los avisos apagados) no notifica, y no
+          # es un fallo de CI: se sale en verde para no ensuciar el check del PR.
           if [ "$WA_ENABLED" != "true" ]; then
-            echo "Notificaciones apagadas para esta empresa; no se envía nada."
+            echo "No se envía nada. ${WA_MOTIVO:-Notificaciones de WhatsApp no configuradas para esta empresa.}"
             exit 0
           fi
           if [ -z "$WA_ADMIN" ]; then
-            echo "::error::Sin teléfono de admin configurado (dashboard → Configuración → Notificaciones)"
-            exit 1
+            echo "La empresa no tiene teléfono administrativo configurado (dashboard → Configuración → Notificaciones); no se envía el aviso al admin."
+            exit 0
           fi
           if [ "$MERGED" = "true" ]; then
             MSG="El PR #${PR_NUM} del repo ${REPO} fue MERGEADO a ${BASE} por ${CERRADO_POR}"
@@ -299,8 +309,10 @@ jobs:
           REPO_FULL: ${{ github.repository }}
           CERRADO_POR: ${{ github.actor }}
         run: |
+          # Empresa sin configurar (o con los avisos apagados) no notifica, y no
+          # es un fallo de CI: se sale en verde para no ensuciar el check del PR.
           if [ "$WA_ENABLED" != "true" ]; then
-            echo "Notificaciones apagadas para esta empresa; no se envía nada."
+            echo "No se envía nada. ${WA_MOTIVO:-Notificaciones de WhatsApp no configuradas para esta empresa.}"
             exit 0
           fi
           # Detectar TODOS los autores reales: líneas <!-- pr_author: login -->
