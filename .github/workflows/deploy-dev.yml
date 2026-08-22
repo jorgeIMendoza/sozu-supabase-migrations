@@ -83,6 +83,4 @@ jobs:
           STATUS: ${{ job.status }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           FIRESTORE_PROJECT: sozu-admin-dev
-          N8N_WEBHOOK: https://automatizacion-n8n.fbqqbe.easypanel.host/webhook/manda_notificacion
-          N8N_APIKEY: 80FA62E3FD0C-4477-8B31-8A2CD6AF7B57
         run: bash ci/notify-deploy.sh
