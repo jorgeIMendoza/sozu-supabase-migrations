@@ -88,7 +88,7 @@ BEGIN
 
   -- (2) Pasar la atribucion de Meta al superviviente (solo si aun no tiene leadgen).
   UPDATE crm_leads_atribucion a
-  SET origen            = COALESCE(NULLIF(a.origen, ''), 'meta'),
+  SET origen            = 'meta',
       meta_leadgen_id   = p.dup_lg,
       meta_campaign_id  = COALESCE(a.meta_campaign_id,  p.meta_campaign_id),
       meta_ad_id        = COALESCE(a.meta_ad_id,        p.meta_ad_id),
